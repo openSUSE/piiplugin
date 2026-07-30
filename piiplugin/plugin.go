@@ -8,6 +8,12 @@ import (
 
 type PiiPluginOption func(*PiiPlugin)
 
+type email interface {
+	BeforeModelCallback(ctx agent.Context, req *model.LLMRequest) (*model.LLMResponse, error)
+	AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error)
+	OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error)
+}
+
 type PiiPlugin struct {
 	noEMail     bool
 	noUserName  bool
@@ -31,22 +37,23 @@ func NewPiiPlugin(opts ...PiiPluginOption) *plugin.Plugin {
 	for _, o := range opts {
 		o(p)
 	}
-	return plugin.New(plugin.Config{
+	plug, _ := plugin.New(plugin.Config{
 		Name:                 "pii_plugin",
-		BeforModelCallback:   p.BeforModelCallback,
+		BeforeModelCallback:  p.BeforeModelCallback,
 		AfterModelCallback:   p.AfterModelCallback,
 		OnModelErrorCallback: p.OnModelErrorCallback,
 	})
+	return plug
 }
 
-func (p *PiiPlugin) BeforModelCallback(ctx agent.Contex, req *model.LLMRequest) (*model.LLMResponse, error) {
+func (p *PiiPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
 	return nil, nil
 }
 
-func (p *PiiPlugin) AfterModelCallback(ctx agent.Contex, req *model.LLMRequest) (*model.LLMResponse, error) {
+func (p *PiiPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
 	return nil, nil
 }
 
-func (p *PiiPlugin) OnModelErrorCallback(ctx agent.Contex, req *model.LLMRequest) (*model.LLMResponse, error) {
+func (p *PiiPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
 	return nil, nil
 }
