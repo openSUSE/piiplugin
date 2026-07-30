@@ -46,10 +46,9 @@ func WithReplacement(replacements *map[string]string) EmailPluginOption {
 }
 
 // NewEmailPlugin creates a new instance of the email filter plugin.
-// It defaults the fallback tldSuffix "*" to "tld" if not specified, ensuring "*" is always set.
 func NewEmailPlugin(opts ...EmailPluginOption) (*plugin.Plugin, error) {
 	p := &EmailPlugin{
-		tldSuffix: map[string]string{"*": "tld"}, // Default value
+		tldSuffix: make(map[string]string),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -57,9 +56,6 @@ func NewEmailPlugin(opts ...EmailPluginOption) (*plugin.Plugin, error) {
 	if p.replacements == nil {
 		m := make(map[string]string)
 		p.replacements = &m
-	}
-	if _, exists := p.tldSuffix["*"]; !exists {
-		p.tldSuffix["*"] = "tld"
 	}
 	return plugin.New(plugin.Config{
 		Name:                 "eMail_plugin",

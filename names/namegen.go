@@ -2,8 +2,10 @@
 package names
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -1705,6 +1707,10 @@ func WithRand(rnd *rand.Rand) GenNameOption {
 	}
 }
 
+// ErrMaxTriesReached is returned when the maximum number of tries to generate
+// a pronounceable name has been exceeded.
+var ErrMaxTriesReached = errors.New("maximum generation tries reached")
+
 func genWord(cfg *genConfig) (string, error) {
 	tries := 0
 	wordLength := 0
@@ -1744,10 +1750,7 @@ func genWord(cfg *genConfig) (string, error) {
 
 		tries++
 		if tries > 4*cfg.length+34 {
-			wordLength = 0
-			wordSize = 0
-			tries = 0
-			word = ""
+			return "", ErrMaxTriesReached
 		}
 	}
 
@@ -1781,4 +1784,35 @@ func GeneratePronounceableName(opts ...GenNameOption) (string, error) {
 		return "", err
 	}
 	return word, nil
+}
+
+// GenerateRandomString generates a completely random string of the specified length using lowercase English alphabet letters.
+//
+// By default, it generates a string of length 10. Pass GenNameOption to customize the generation:
+//   - names.WithLength(int): specifies a length between 1 and 255.
+//   - names.WithSeed(int64): configures a deterministic seeded pseudo-random generator.
+//   - names.WithRand(*rand.Rand): configures a custom math/rand generator.
+func GenerateRandomString(opts ...GenNameOption) (string, error) {
+	cfg := &genConfig{
+		length: 10,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.length <= 0 || cfg.length > 255 {
+		return "", fmt.Errorf("invalid string length: %d (must be between 1 and 255)", cfg.length)
+	}
+
+	if cfg.rnd == nil {
+		cfg.rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+
+	const alphabet = "abcdefghijklmnopqrstuvwxyz"
+	var sb strings.Builder
+	sb.Grow(cfg.length)
+	for i := 0; i < cfg.length; i++ {
+		sb.WriteByte(alphabet[cfg.rnd.Intn(len(alphabet))])
+	}
+	return sb.String(), nil
 }

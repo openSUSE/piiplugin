@@ -2,8 +2,6 @@ package filter
 
 import (
 	"testing"
-
-	"github.com/openSUSE/piiplug/names"
 )
 
 // TestGetReplacement_Basic verifies that an empty map generates a brand new replacement,
@@ -158,24 +156,25 @@ func TestGetReplacement_CollisionAvoidance(t *testing.T) {
 	}
 }
 
-// TestGetReplacement_Mocked verifies end-to-end integration with names.MockGenerator
-// and the names.UseMock flag using the default PredictableMockGenerator behavior.
+// TestGetReplacement_Mocked verifies end-to-end mock behavior where names are reversed
+// when UseMock is enabled.
 func TestGetReplacement_Mocked(t *testing.T) {
-	names.UseMock = true
+	UseMock = true
 	defer func() {
-		names.UseMock = false
+		UseMock = false
 	}()
 
 	replacements := make(map[string]string)
-	original := "john"
-	fullInput := "my name is john"
 
-	rep := GetReplacement(&replacements, original, fullInput)
+	// Test 1: "foo" -> "oof"
+	repFoo := GetReplacement(&replacements, "foo", "hello foo")
+	if repFoo != "oof" {
+		t.Errorf("Expected 'oof', got %q", repFoo)
+	}
 
-	// Since "john" has length 4 which is < minNamelength (8),
-	// we expect the mock to be called with length 8, returning "aaaaaaaa".
-	expected := "aaaaaaaa"
-	if rep != expected {
-		t.Errorf("Expected mocked replacement %q, got %q", expected, rep)
+	// Test 2: "alice" -> "ecila"
+	repAlice := GetReplacement(&replacements, "alice", "hello alice")
+	if repAlice != "ecila" {
+		t.Errorf("Expected 'ecila', got %q", repAlice)
 	}
 }
