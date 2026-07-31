@@ -2,6 +2,7 @@ package filter
 
 import (
 	"testing"
+	"unicode"
 )
 
 // TestGetReplacement_Basic verifies that an empty map generates a brand new replacement,
@@ -176,5 +177,59 @@ func TestGetReplacement_Mocked(t *testing.T) {
 	repAlice := GetReplacement(&replacements, "alice", "hello alice")
 	if repAlice != "ecila" {
 		t.Errorf("Expected 'ecila', got %q", repAlice)
+	}
+}
+
+// TestGetReplacement_CaseMatching verifies that the replacements preserve and match
+// the casing of the original input string.
+func TestGetReplacement_CaseMatching(t *testing.T) {
+	replacements := make(map[string]string)
+
+	// Pre-fill the map: "teken" -> "mechen", "baar" -> "foo"
+	replacements["teken"] = "mechen"
+	replacements["baar"] = "foo"
+
+	// 1. "Mechen" should be replaced by "Teken" (Capitalized first letter)
+	rep1 := GetReplacement(&replacements, "Mechen", "Hello Mechen")
+	if rep1 != "Teken" {
+		t.Errorf("Expected 'Teken' for 'Mechen' with pre-filled 'teken' -> 'mechen', got %q", rep1)
+	}
+
+	// 2. "FoO" should be replaced by "BaAr" (Alternate uppercase/lowercase)
+	rep2 := GetReplacement(&replacements, "FoO", "Hello FoO")
+	if rep2 != "BaAr" {
+		t.Errorf("Expected 'BaAr' for 'FoO' with pre-filled 'baar' -> 'foo', got %q", rep2)
+	}
+
+	// 3. "foo" should be replaced by "baar" (exact match/all lowercase)
+	rep3 := GetReplacement(&replacements, "foo", "Hello foo")
+	if rep3 != "baar" {
+		t.Errorf("Expected 'baar' for 'foo', got %q", rep3)
+	}
+
+	// 4. "FOO" should be replaced by "BAAR" (all uppercase)
+	rep4 := GetReplacement(&replacements, "FOO", "Hello FOO")
+	if rep4 != "BAAR" {
+		t.Errorf("Expected 'BAAR' for 'FOO', got %q", rep4)
+	}
+
+	// 5. Test generating a brand new word with specific casing: "Alice"
+	// Because len("Alice") is 5 (less than minNameLength 8), the generated name
+	// will be longer, but we should verify that it matches the casing structure correctly.
+	repAlice := GetReplacement(&replacements, "Alice", "Hello Alice")
+	if len(repAlice) == 0 {
+		t.Fatal("Expected non-empty replacement for 'Alice'")
+	}
+	runes := []rune(repAlice)
+	if !unicode.IsUpper(runes[0]) {
+		t.Errorf("Expected replacement for 'Alice' to start with an uppercase letter, got %q", repAlice)
+	}
+	for i := 1; i < len(runes); i++ {
+		// Since "Alice" has length 5: A (upper), l, i, c, e (lower).
+		// Any index >= 5 keeps the replacement's original casing.
+		// For index 1 to 4, they must be lowercase since 'l', 'i', 'c', 'e' are lowercase.
+		if i < 5 && !unicode.IsLower(runes[i]) {
+			t.Errorf("Expected replacement rune at index %d to be lowercase, got %c in %q", i, runes[i], repAlice)
+		}
 	}
 }
