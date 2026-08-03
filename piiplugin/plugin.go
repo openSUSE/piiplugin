@@ -2,6 +2,7 @@ package piiplugin
 
 import (
 	filteremail "github.com/openSUSE/piiplug/filter/email"
+	filterhost "github.com/openSUSE/piiplug/filter/host"
 	filterusername "github.com/openSUSE/piiplug/filter/username"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
@@ -13,8 +14,10 @@ type PiiPluginOption func(*PiiPlugin)
 type PiiPlugin struct {
 	noEMail        bool
 	noUserName     bool
+	noHost         bool
 	eMailPlugin    *plugin.Plugin
 	userNamePlugin *plugin.Plugin
+	hostPlugin     *plugin.Plugin
 }
 
 func WithoutEmail() PiiPluginOption {
@@ -26,6 +29,12 @@ func WithoutEmail() PiiPluginOption {
 func WithoutUsername() PiiPluginOption {
 	return func(cfg *PiiPlugin) {
 		cfg.noUserName = true
+	}
+}
+
+func WithoutHost() PiiPluginOption {
+	return func(cfg *PiiPlugin) {
+		cfg.noHost = true
 	}
 }
 
@@ -57,6 +66,16 @@ func NewPiiPlugin(opts ...PiiPluginOption) *plugin.Plugin {
 		}
 	}
 
+	if !p.noHost {
+		var err error
+		p.hostPlugin, err = filterhost.NewHostPlugin(
+			filterhost.WithReplacement(&replacements),
+		)
+		if err != nil {
+			// ignore error as NewHostPlugin default options won't fail
+		}
+	}
+
 	plug, _ := plugin.New(plugin.Config{
 		Name:                 "pii_plugin",
 		BeforeModelCallback:  p.BeforeModelCallback,
@@ -81,10 +100,26 @@ func (p *PiiPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest
 			}
 		}
 	}
+	if p.hostPlugin != nil {
+		if cb := p.hostPlugin.BeforeModelCallback(); cb != nil {
+			if resp, err := cb(ctx, req); err != nil || resp != nil {
+				return resp, err
+			}
+		}
+	}
 	return nil, nil
 }
 
 func (p *PiiPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
+	if p.hostPlugin != nil {
+		if cb := p.hostPlugin.AfterModelCallback(); cb != nil {
+			if r, e := cb(ctx, resp, err); e != nil {
+				return nil, e
+			} else if r != nil {
+				resp = r
+			}
+		}
+	}
 	if p.userNamePlugin != nil {
 		if cb := p.userNamePlugin.AfterModelCallback(); cb != nil {
 			if r, e := cb(ctx, resp, err); e != nil {
@@ -119,6 +154,15 @@ func (p *PiiPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMReques
 	}
 	if p.userNamePlugin != nil {
 		if cb := p.userNamePlugin.OnModelErrorCallback(); cb != nil {
+			if r, e := cb(ctx, req, err); e != nil {
+				return nil, e
+			} else if r != nil {
+				resp = r
+			}
+		}
+	}
+	if p.hostPlugin != nil {
+		if cb := p.hostPlugin.OnModelErrorCallback(); cb != nil {
 			if r, e := cb(ctx, req, err); e != nil {
 				return nil, e
 			} else if r != nil {
