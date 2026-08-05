@@ -1,6 +1,7 @@
 package piiplugin
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,11 +18,10 @@ type mockContext struct {
 	agent.Context
 }
 
-func TestPiiPlugin_Integration(t *testing.T) {
-	filter.UseMock = true
-	defer func() {
-		filter.UseMock = false
-	}()
+// newTestPiiPlugin builds a PiiPlugin whose three filters share one replacement
+// table and know a fixed set of users and hosts.
+func newTestPiiPlugin(t *testing.T) *PiiPlugin {
+	t.Helper()
 
 	p := &PiiPlugin{}
 	replacements := make(map[string]string)
@@ -61,6 +61,17 @@ func TestPiiPlugin_Integration(t *testing.T) {
 	}
 	p.hostPlugin = hostPlg
 
+	return p
+}
+
+func TestPiiPlugin_Integration(t *testing.T) {
+	filter.UseMock = true
+	defer func() {
+		filter.UseMock = false
+	}()
+
+	p := newTestPiiPlugin(t)
+
 	// Create request containing email, username, and hostname
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
@@ -73,7 +84,7 @@ func TestPiiPlugin_Integration(t *testing.T) {
 	}
 
 	ctx := &mockContext{}
-	_, err = p.BeforeModelCallback(ctx, req)
+	_, err := p.BeforeModelCallback(ctx, req)
 	if err != nil {
 		t.Fatalf("BeforeModelCallback failed: %v", err)
 	}
@@ -110,6 +121,102 @@ func TestPiiPlugin_Integration(t *testing.T) {
 	unredactedText := resp.Content.Parts[0].Text
 	if !strings.Contains(unredactedText, "Bob") || !strings.Contains(unredactedText, "alice@company.com") || !strings.Contains(unredactedText, "mailserver.myoffice.internal") {
 		t.Errorf("Expected full unredaction, got: %q", unredactedText)
+	}
+}
+
+// TestPiiPlugin_ToolCallbacks verifies that a tool result, which reaches the
+// model as a FunctionResponse and not as text, is redacted by all filters and
+// that the arguments of the next tool call are restored again.
+func TestPiiPlugin_ToolCallbacks(t *testing.T) {
+	filter.UseMock = true
+	defer func() {
+		filter.UseMock = false
+	}()
+
+	p := newTestPiiPlugin(t)
+	ctx := &mockContext{}
+	args := map[string]any{}
+
+	result := map[string]any{
+		"entries": []any{
+			map[string]any{
+				"uid":     1002,
+				"user":    "Bob",
+				"contact": "alice@company.com",
+				"host":    "mailserver.myoffice.internal",
+			},
+		},
+	}
+
+	if _, err := p.AfterToolCallback(ctx, nil, args, result, nil); err != nil {
+		t.Fatalf("AfterToolCallback failed: %v", err)
+	}
+
+	entry := result["entries"].([]any)[0].(map[string]any)
+	for field, original := range map[string]string{
+		"user":    "Bob",
+		"contact": "alice@company.com",
+		"host":    "mailserver.myoffice.internal",
+	} {
+		if got := entry[field].(string); strings.Contains(got, original) {
+			t.Errorf("Expected %q to be redacted in field %q, got: %q", original, field, got)
+		}
+	}
+	if entry["user"] != "boB" {
+		t.Errorf("Expected Bob to be redacted to boB, got: %v", entry["user"])
+	}
+	if entry["host"] != "lanretni.eciffoym.revresliam" {
+		t.Errorf("Expected the host to be redacted, got: %v", entry["host"])
+	}
+	if entry["uid"] != 1002 {
+		t.Errorf("Non string values of the result must be kept, got: %v", entry["uid"])
+	}
+
+	// The model answers with the replacements it has seen, so the arguments of
+	// a follow up tool call have to be restored before the tool runs.
+	nextArgs := map[string]any{
+		"user": "boB",
+		"host": "lanretni.eciffoym.revresliam",
+	}
+	if _, err := p.BeforeToolCallback(ctx, nil, nextArgs); err != nil {
+		t.Fatalf("BeforeToolCallback failed: %v", err)
+	}
+	if nextArgs["user"] != "Bob" || nextArgs["host"] != "mailserver.myoffice.internal" {
+		t.Errorf("Expected the tool arguments to be restored, got: %v", nextArgs)
+	}
+
+	// The arguments belong to the function call kept in the session, so they
+	// have to carry the replacements again once the tool has run.
+	if _, err := p.AfterToolCallback(ctx, nil, nextArgs, map[string]any{}, nil); err != nil {
+		t.Fatalf("AfterToolCallback failed: %v", err)
+	}
+	if nextArgs["user"] != "boB" || nextArgs["host"] != "lanretni.eciffoym.revresliam" {
+		t.Errorf("Expected the tool arguments to be redacted again, got: %v", nextArgs)
+	}
+}
+
+// TestPiiPlugin_OnToolErrorCallback makes sure a failing tool does not leak the
+// data through its error message.
+func TestPiiPlugin_OnToolErrorCallback(t *testing.T) {
+	filter.UseMock = true
+	defer func() {
+		filter.UseMock = false
+	}()
+
+	p := newTestPiiPlugin(t)
+
+	result, err := p.OnToolErrorCallback(&mockContext{}, nil,
+		map[string]any{}, errors.New("cannot reach mailserver.myoffice.internal as Bob"))
+	if err != nil {
+		t.Fatalf("OnToolErrorCallback failed: %v", err)
+	}
+
+	message, ok := result["error"].(string)
+	if !ok {
+		t.Fatalf("Expected an error message in the result, got: %v", result)
+	}
+	if strings.Contains(message, "Bob") || strings.Contains(message, "mailserver.myoffice.internal") {
+		t.Errorf("Expected the error message to be redacted, got: %q", message)
 	}
 }
 

@@ -163,5 +163,8 @@ func NewUsernamePlugin(opts ...UsernamePluginOption) (*plugin.Plugin, error) {
 		BeforeModelCallback:  p.BeforeModelCallback,
 		AfterModelCallback:   p.AfterModelCallback,
 		OnModelErrorCallback: p.OnModelErrorCallback,
+		BeforeToolCallback:   p.BeforeToolCallback,
+		AfterToolCallback:    p.AfterToolCallback,
+		OnToolErrorCallback:  p.OnToolErrorCallback,
 	})
 }

@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
 )
 
 // UniqueNamesPlugin manages a shared replacement table and performs
@@ -144,4 +145,50 @@ func (p *UniqueNamesPlugin) AfterModelCallback(ctx agent.Context, resp *model.LL
 // OnModelErrorCallback is a pass-through for model errors.
 func (p *UniqueNamesPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
 	return nil, nil
+}
+
+// BeforeToolCallback restores the original names in the tool arguments. The
+// model only ever sees the replacements, so the arguments it derives from them
+// would not match anything on the machine the tool runs on. The arguments are
+// updated in place and a nil result is returned, which keeps both the tool call
+// itself and the callbacks of the remaining filters alive.
+func (p *UniqueNamesPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+	MapToolValues(args, p.UnredactText)
+	return nil, nil
+}
+
+// AfterToolCallback redacts the tool result before it is handed to the model.
+// A tool result travels as a FunctionResponse part, which carries its payload
+// in a map and therefore never passes the text redaction of
+// BeforeModelCallback.
+//
+// The arguments are redacted again as well. BeforeToolCallback restored them
+// for the tool run, but they belong to the function call of the model, which
+// stays in the session and is sent to the model again with every following
+// request.
+func (p *UniqueNamesPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
+	fullInput := ToolValuesText(args) + ToolValuesText(result)
+	redact := func(text string) string {
+		return p.RedactUniqueNames(text, fullInput)
+	}
+	MapToolValues(args, redact)
+	if result == nil {
+		return nil, nil
+	}
+	MapToolValues(result, redact)
+	return nil, nil
+}
+
+// OnToolErrorCallback redacts the message of a failed tool call, which the flow
+// would otherwise pass on to the model as {"error": ...}. Unlike the other tool
+// callbacks this one has to return a result, which ends the callback chain of
+// the runner, so filters that are meant to redact tool errors together have to
+// be combined by piiplugin.NewPiiPlugin instead of being registered
+// individually.
+func (p *UniqueNamesPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
+	if err == nil {
+		return nil, nil
+	}
+	message := err.Error()
+	return map[string]any{"error": p.RedactUniqueNames(message, message)}, nil
 }

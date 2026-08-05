@@ -1,6 +1,7 @@
 package filterusername
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -178,6 +179,92 @@ func TestUsernamePlugin_Callbacks(t *testing.T) {
 	unredactedText := resp.Content.Parts[0].Text
 	if !strings.Contains(unredactedText, "John") {
 		t.Errorf("AfterModelCallback did not restore John: %q", unredactedText)
+	}
+}
+
+// TestUsernamePlugin_ToolCallbacks checks the tool round trip: the arguments
+// the model sends are restored to the real names before the tool runs and the
+// result of the tool is redacted before it goes back to the model.
+func TestUsernamePlugin_ToolCallbacks(t *testing.T) {
+	filter.UseMock = true
+	defer func() {
+		filter.UseMock = false
+	}()
+
+	replMap := newReplMap()
+	getpasswdMock := func() ([]string, error) {
+		return []string{
+			"jdoe:x:1001:1001:John Doe,Room 101,,:/home/jdoe:/bin/bash",
+		}, nil
+	}
+
+	plugin, err := NewUsernamePlugin(
+		WithReplacement(replMap),
+		WithGetpasswdFunc(getpasswdMock),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create plugin: %v", err)
+	}
+
+	ctx := &mockContext{}
+	args := map[string]any{}
+
+	// A get_processes style result, the payload is a map and not text.
+	result := map[string]any{
+		"processes": []any{
+			map[string]any{
+				"pid":      1234,
+				"username": "jdoe",
+				"name":     "bash",
+				"cmdline":  "/home/jdoe/bin/backup",
+			},
+		},
+	}
+	if _, err := plugin.AfterToolCallback()(ctx, nil, args, result, nil); err != nil {
+		t.Fatalf("AfterToolCallback failed: %v", err)
+	}
+
+	proc := result["processes"].([]any)[0].(map[string]any)
+	if proc["username"] != "eodj" {
+		t.Errorf("Expected the username in the tool result to be redacted, got: %v", proc["username"])
+	}
+	if proc["cmdline"] != "/home/eodj/bin/backup" {
+		t.Errorf("Expected the username in the command line to be redacted, got: %v", proc["cmdline"])
+	}
+	if proc["pid"] != 1234 {
+		t.Errorf("Non string values of the result must be kept, got: %v", proc["pid"])
+	}
+
+	// The model has only seen the replacement, so a follow up call asks the
+	// tool for "eodj", which has to be turned back into the real name.
+	nextArgs := map[string]any{"filter_name": "eodj"}
+	if _, err := plugin.BeforeToolCallback()(ctx, nil, nextArgs); err != nil {
+		t.Fatalf("BeforeToolCallback failed: %v", err)
+	}
+	if nextArgs["filter_name"] != "jdoe" {
+		t.Errorf("Expected the tool argument to be restored to 'jdoe', got: %v", nextArgs["filter_name"])
+	}
+
+	// The arguments belong to the function call kept in the session, so they
+	// have to carry the replacement again once the tool has run.
+	if _, err := plugin.AfterToolCallback()(ctx, nil, nextArgs, map[string]any{}, nil); err != nil {
+		t.Fatalf("AfterToolCallback failed: %v", err)
+	}
+	if nextArgs["filter_name"] != "eodj" {
+		t.Errorf("Expected the tool argument to be redacted again, got: %v", nextArgs["filter_name"])
+	}
+
+	// A failing tool must not leak the name through its error message either.
+	errResult, err := plugin.OnToolErrorCallback()(ctx, nil, args, errors.New("ps failed for jdoe"))
+	if err != nil {
+		t.Fatalf("OnToolErrorCallback failed: %v", err)
+	}
+	message, ok := errResult["error"].(string)
+	if !ok {
+		t.Fatalf("Expected an error message in the result, got: %v", errResult)
+	}
+	if strings.Contains(message, "jdoe") || !strings.Contains(message, "eodj") {
+		t.Errorf("Expected the error message to be redacted, got: %q", message)
 	}
 }
 
