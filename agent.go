@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -12,25 +11,17 @@ import (
 	"strings"
 
 	filterusername "github.com/openSUSE/piiplug/filter/username"
+	"github.com/toon-format/toon-go"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
 	"google.golang.org/adk/v2/cmd/launcher"
-	"google.golang.org/adk/v2/cmd/launcher/console"
-	"google.golang.org/adk/v2/cmd/launcher/universal"
-	"google.golang.org/adk/v2/cmd/launcher/web"
-	"google.golang.org/adk/v2/cmd/launcher/web/a2a"
-	"google.golang.org/adk/v2/cmd/launcher/web/api"
-	"google.golang.org/adk/v2/cmd/launcher/web/triggers/eventarc"
-	"google.golang.org/adk/v2/cmd/launcher/web/triggers/pubsub"
-	"google.golang.org/adk/v2/cmd/launcher/web/webui"
+	"google.golang.org/adk/v2/cmd/launcher/full"
 	"google.golang.org/adk/v2/model/openaimodel"
 	"google.golang.org/adk/v2/plugin"
 	"google.golang.org/adk/v2/runner"
-	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/session/database"
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
-	"google.golang.org/genai"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -38,13 +29,13 @@ import (
 
 // ProcessInfo represents details of a running process.
 type ProcessInfo struct {
-	Pid        int     `json:"pid" jsonschema:"The unique process ID."`
-	Name       string  `json:"name" jsonschema:"The executable name of the process."`
-	Uid        uint32  `json:"uid" jsonschema:"The owner's numeric user ID."`
-	Username   string  `json:"username" jsonschema:"The owner's username."`
-	MemoryB    uint64  `json:"memory_bytes" jsonschema:"Resident set size memory in bytes."`
-	VSizeB     uint64  `json:"vsize_bytes" jsonschema:"Virtual memory size in bytes."`
-	CpuTimeSec float64 `json:"cpu_time_seconds" jsonschema:"Total CPU time (user + system) consumed in seconds."`
+	Pid        int     `json:"pid" toon:"pid" jsonschema:"The unique process ID."`
+	Name       string  `json:"name" toon:"name" jsonschema:"The executable name of the process."`
+	Uid        uint32  `json:"uid" toon:"uid" jsonschema:"The owner's numeric user ID."`
+	Username   string  `json:"username" toon:"username" jsonschema:"The owner's username."`
+	MemoryB    uint64  `json:"memory_bytes" toon:"memory_bytes" jsonschema:"Resident set size memory in bytes."`
+	VSizeB     uint64  `json:"vsize_bytes" toon:"vsize_bytes" jsonschema:"Virtual memory size in bytes."`
+	CpuTimeSec float64 `json:"cpu_time_seconds" toon:"cpu_time_seconds" jsonschema:"Total CPU time (user + system) consumed in seconds."`
 }
 
 // GetProcessesArgs is the arguments for the get_processes tool.
@@ -54,11 +45,11 @@ type GetProcessesArgs struct {
 
 // GetProcessesResult is the response of the get_processes tool.
 type GetProcessesResult struct {
-	Processes []ProcessInfo `json:"processes" jsonschema:"List of running processes."`
+	Processes string `json:"processes" jsonschema:"List of running processes in TOON format."`
 }
 
 // psFormat are the columns requested from ps, in order and without headers.
-// comm comes last because a command name may contain spaces.
+// comes last because a command name may contain spaces.
 const psFormat = "pid=,uid=,user=,rss=,vsz=,times=,comm="
 
 // psColumns is the number of columns psFormat asks for.
@@ -92,7 +83,12 @@ func getProcesses(ctx agent.Context, args GetProcessesArgs) (GetProcessesResult,
 		processes = append(processes, proc)
 	}
 
-	return GetProcessesResult{Processes: processes}, nil
+	toonBytes, err := toon.Marshal(processes)
+	if err != nil {
+		return GetProcessesResult{}, fmt.Errorf("failed to format processes in TOON: %w", err)
+	}
+
+	return GetProcessesResult{Processes: string(toonBytes)}, nil
 }
 
 // parsePsLine turns one line of ps output, as described by psFormat, into a
@@ -134,80 +130,6 @@ func parsePsLine(line string) (ProcessInfo, error) {
 		VSizeB:     vszKiB * 1024,
 		CpuTimeSec: cpuTimeSec,
 	}, nil
-}
-
-type promptLauncher struct {
-	prompt string
-	flags  *flag.FlagSet
-}
-
-func newPromptLauncher() launcher.SubLauncher {
-	fs := flag.NewFlagSet("prompt", flag.ContinueOnError)
-	pl := &promptLauncher{flags: fs}
-	fs.StringVar(&pl.prompt, "p", "", "The prompt to run the agent with")
-	return pl
-}
-
-func (l *promptLauncher) Keyword() string {
-	return "prompt"
-}
-
-func (l *promptLauncher) Parse(args []string) ([]string, error) {
-	err := l.flags.Parse(args)
-	return l.flags.Args(), err
-}
-
-func (l *promptLauncher) CommandLineSyntax() string {
-	return "  -p string\n        The prompt to run the agent with"
-}
-
-func (l *promptLauncher) SimpleDescription() string {
-	return "runs the agent with a single prompt and exits"
-}
-
-func (l *promptLauncher) Run(ctx context.Context, config *launcher.Config) error {
-	if l.prompt == "" {
-		// If no prompt is specified, default to the interactive console launcher
-		return console.NewLauncher().Run(ctx, config)
-	}
-
-	userID, appName := "console_user", "console_app"
-	resp, err := config.SessionService.Create(ctx, &session.CreateRequest{
-		AppName: appName,
-		UserID:  userID,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
-	}
-	sess := resp.Session
-
-	r, err := runner.New(runner.Config{
-		AppName:        appName,
-		Agent:          config.AgentLoader.RootAgent(),
-		SessionService: config.SessionService,
-		PluginConfig:   config.PluginConfig,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create runner: %w", err)
-	}
-
-	userMsg := genai.NewContentFromText(l.prompt, genai.RoleUser)
-
-	for event, err := range r.Run(ctx, userID, sess.ID(), userMsg, agent.RunConfig{
-		StreamingMode: agent.StreamingModeSSE,
-	}) {
-		if err != nil {
-			fmt.Printf("\nAGENT_ERROR: %v\n", err)
-		} else {
-			if event.LLMResponse.Content != nil {
-				for _, p := range event.LLMResponse.Content.Parts {
-					fmt.Print(p.Text)
-				}
-			}
-		}
-	}
-	fmt.Println()
-	return nil
 }
 
 func main() {
@@ -280,17 +202,8 @@ func main() {
 		},
 	}
 
-	l := universal.NewLauncher(
-		newPromptLauncher(),
-		console.NewLauncher(),
-		web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), eventarc.NewLauncher(), api.NewLauncher()),
-	)
-
-	args := os.Args[1:]
-	if len(args) == 0 {
-		args = []string{"console"}
-	}
-	if err := l.Execute(ctx, config, args); err != nil {
+	l := full.NewLauncher()
+	if err := l.Execute(ctx, config, os.Args[1:]); err != nil {
 		log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
 	}
 }
