@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -19,9 +20,11 @@ import (
 	"google.golang.org/adk/v2/model/openaimodel"
 	"google.golang.org/adk/v2/plugin"
 	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/session/database"
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
+	"google.golang.org/genai"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -40,11 +43,6 @@ type ProcessInfo struct {
 	CpuTimeSec float64 `json:"cpu_time_seconds" toon:"cpu_time_seconds" jsonschema:"Total CPU time (user + system) consumed in seconds."`
 }
 
-// GetProcessesArgs is the arguments for the get_processes tool.
-type GetProcessesArgs struct {
-	FilterName string `json:"filter_name,omitempty" jsonschema:"An optional case-insensitive substring filter for process names."`
-}
-
 // GetProcessesResult is the response of the get_processes tool.
 type GetProcessesResult struct {
 	Processes string `json:"processes" jsonschema:"List of running processes in TOON format."`
@@ -57,7 +55,7 @@ const psFormat = "pid=,uid=,user=,rss=,vsz=,times=,comm="
 // psColumns is the number of columns psFormat asks for.
 const psColumns = 7
 
-func getProcesses(ctx agent.Context, args GetProcessesArgs) (GetProcessesResult, error) {
+func getProcesses(ctx agent.Context, args struct{}) (GetProcessesResult, error) {
 	out, err := exec.CommandContext(ctx, "ps", "-o", psFormat, "--ppid", "2", "-p", "2", "--deselect").Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -67,7 +65,6 @@ func getProcesses(ctx agent.Context, args GetProcessesArgs) (GetProcessesResult,
 		return GetProcessesResult{}, fmt.Errorf("failed to run ps: %w", err)
 	}
 
-	filter := strings.ToLower(args.FilterName)
 	var processes []ProcessInfo
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -77,9 +74,6 @@ func getProcesses(ctx agent.Context, args GetProcessesArgs) (GetProcessesResult,
 		proc, err := parsePsLine(line)
 		if err != nil {
 			// A single unparsable line should not fail the whole listing.
-			continue
-		}
-		if filter != "" && !strings.Contains(strings.ToLower(proc.Name), filter) {
 			continue
 		}
 		processes = append(processes, proc)
@@ -177,8 +171,8 @@ func main() {
 		log.Fatalf("Failed to auto-migrate database: %v", err)
 	}
 
-	// Consume our own flag, the rest of the arguments belong to the launcher.
-	disableUsernamePlugin, launcherArgs, err := utils.SplitOwnFlags(os.Args[1:])
+	// Consume our own flags, the rest of the arguments belong to the launcher.
+	disableUsernamePlugin, prompt, launcherArgs, err := utils.SplitOwnFlags(os.Args[1:])
 	if err != nil {
 		log.Fatalf("Failed to parse arguments: %v", err)
 	}
@@ -215,7 +209,68 @@ func main() {
 	}
 
 	l := full.NewLauncher()
+
+	// A single prompt is answered directly, without starting a launcher.
+	if prompt != "" {
+		if err := runPrompt(ctx, config, prompt); err != nil {
+			log.Fatalf("Run failed: %v\n", err)
+		}
+		return
+	}
+
+	// Without any argument there is nothing to run, so show how to run it.
+	if len(launcherArgs) == 0 {
+		fmt.Printf("Usage: %s [-p|--prompt PROMPT] [--disable-username-plugin] [LAUNCHER ARGUMENTS]\n\n", filepath.Base(os.Args[0]))
+		fmt.Printf("  -p, --prompt PROMPT\n        answer a single prompt and exit\n")
+		fmt.Printf("  --disable-username-plugin\n        run without the username PII filter\n\n")
+		fmt.Println(l.CommandLineSyntax())
+		return
+	}
+
 	if err := l.Execute(ctx, config, launcherArgs); err != nil {
 		log.Fatalf("Run failed: %v\n", err)
 	}
+}
+
+// runPrompt answers a single prompt with the configured agent and prints the
+// response to stdout. It uses the same session service and plugins as the
+// launcher, so the PII filters apply here as well.
+func runPrompt(ctx context.Context, config *launcher.Config, prompt string) error {
+	const appName, userID = "prompt_app", "prompt_user"
+
+	resp, err := config.SessionService.Create(ctx, &session.CreateRequest{
+		AppName: appName,
+		UserID:  userID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+
+	r, err := runner.New(runner.Config{
+		AppName:        appName,
+		Agent:          config.AgentLoader.RootAgent(),
+		SessionService: config.SessionService,
+		PluginConfig:   config.PluginConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create runner: %w", err)
+	}
+
+	msg := genai.NewContentFromText(prompt, genai.RoleUser)
+	for event, err := range r.Run(ctx, userID, resp.Session.ID(), msg, agent.RunConfig{
+		StreamingMode: agent.StreamingModeNone,
+	}) {
+		if err != nil {
+			return err
+		}
+		if event.LLMResponse.Content == nil {
+			continue
+		}
+		for _, part := range event.LLMResponse.Content.Parts {
+			fmt.Print(part.Text)
+		}
+	}
+	fmt.Println()
+
+	return nil
 }

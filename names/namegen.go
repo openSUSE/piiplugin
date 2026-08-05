@@ -1677,13 +1677,22 @@ func illegalPlacement(units []uint16, nameLen int) bool {
 	return false
 }
 
+// GeneratorType defines the type of generator to use.
+type GeneratorType int
+
+const (
+	PronounceableName GeneratorType = iota
+	RandomString
+)
+
 // GenNameOption defines a functional option configuration for GeneratePronounceableName.
 type GenNameOption func(*genConfig)
 
 // genConfig represents the internal generator configuration.
 type genConfig struct {
-	length int
-	rnd    *rand.Rand
+	length    int
+	rnd       *rand.Rand
+	generator GeneratorType
 }
 
 // WithLength returns a GenNameOption configuring the name length.
@@ -1704,6 +1713,13 @@ func WithSeed(seed int64) GenNameOption {
 func WithRand(rnd *rand.Rand) GenNameOption {
 	return func(cfg *genConfig) {
 		cfg.rnd = rnd
+	}
+}
+
+// WithGenerator returns a GenNameOption that selects the generator type (pronounceable names or random strings).
+func WithGenerator(genType GeneratorType) GenNameOption {
+	return func(cfg *genConfig) {
+		cfg.generator = genType
 	}
 }
 
@@ -1815,4 +1831,38 @@ func GenerateRandomString(opts ...GenNameOption) (string, error) {
 		sb.WriteByte(alphabet[cfg.rnd.Intn(len(alphabet))])
 	}
 	return sb.String(), nil
+}
+
+// GenerateName is a unified function that generates names or random strings based on the GeneratorType option.
+//
+// The generator type defaults to PronounceableName if not specified. Use WithGenerator to select RandomString.
+//
+// By default, it generates a name of length 10. Pass GenNameOption to customize the generation:
+//   - names.WithLength(int): specifies a length between 1 and 255.
+//   - names.WithSeed(int64): configures a deterministic seeded pseudo-random generator.
+//   - names.WithRand(*rand.Rand): configures a custom math/rand generator.
+//   - names.WithGenerator(GeneratorType): selects the generator type (PronounceableName or RandomString).
+func GenerateName(opts ...GenNameOption) (string, error) {
+	cfg := &genConfig{
+		length:    10,
+		generator: PronounceableName,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.length <= 0 || cfg.length > 255 {
+		return "", fmt.Errorf("invalid name length: %d (must be between 1 and 255)", cfg.length)
+	}
+
+	if cfg.rnd == nil {
+		cfg.rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+
+	switch cfg.generator {
+	case RandomString:
+		return GenerateRandomString(opts...)
+	default:
+		return GeneratePronounceableName(opts...)
+	}
 }

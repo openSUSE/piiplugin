@@ -9,12 +9,12 @@ import (
 )
 
 func main() {
-	lengthFlag := flag.Int("length", 10, "length of the pronounceable name (1-255)")
+	lengthFlag := flag.Int("length", 10, "length of the generated name (1-255)")
 	countFlag := flag.Int("count", 1, "number of names to generate")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Generates pronounceable names using the APG algorithm.\n\n")
+		fmt.Fprintf(os.Stderr, "Generates random strings.\n\n")
 		flag.PrintDefaults()
 	}
 
@@ -31,7 +31,7 @@ func main() {
 	}
 
 	for i := 0; i < *countFlag; i++ {
-		name, err := names.GeneratePronounceableName(names.WithLength(*lengthFlag))
+		name, err := names.GenerateName(names.WithLength(*lengthFlag))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating name: %v\n", err)
 			os.Exit(1)

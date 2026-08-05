@@ -1,48 +1,168 @@
 package utils
 
 import (
-	"fmt"
-	"strconv"
+	"os"
 	"strings"
 )
 
-const DisableUsernamePluginFlag = "disable-username-plugin"
+// BoolFlag describes a --disable-username-plugin style flag.
+type BoolFlag struct {
+	Name       string
+	Bool       bool
+	Aliases    []string
+	defaultVal bool
+}
 
-// SplitOwnFlags reports whether DisableUsernamePluginFlag was given and returns
-// the arguments with it removed. Everything else, -h and the sublauncher
-// keywords included, is passed through untouched.
-func SplitOwnFlags(args []string) (bool, []string, error) {
-	disabled := false
-	rest := make([]string, 0, len(args))
+// StringFlag describes a --prompt style flag.
+type StringFlag struct {
+	Name       string
+	Value      string
+	Aliases    []string
+	defaultVal string
+}
 
-	for i, arg := range args {
-		// A bare "--" ends flag parsing, the launcher gets the remainder as is.
-		if arg == "--" {
-			rest = append(rest, args[i:]...)
-			break
-		}
+type FlagSet struct {
+	boolFlags   []*BoolFlag
+	stringFlags []*StringFlag
+	params      *SplitParams
+}
 
-		name, isFlag := strings.CutPrefix(arg, "--")
-		if !isFlag {
-			name, isFlag = strings.CutPrefix(arg, "-")
-		}
-		name, value, hasValue := strings.Cut(name, "=")
-		if !isFlag || name != DisableUsernamePluginFlag {
-			rest = append(rest, arg)
-			continue
-		}
+type SplitParams struct {
+	Args []string
+}
 
-		// As in the flag package, a boolean is only settable as -flag=value.
-		if !hasValue {
-			disabled = true
-			continue
+func NewFlagSet(boolFlags ...interface{}) *FlagSet {
+	fs := &FlagSet{}
+	for _, f := range boolFlags {
+		switch flag := f.(type) {
+		case *BoolFlag:
+			fs.boolFlags = append(fs.boolFlags, flag)
+		case *StringFlag:
+			fs.stringFlags = append(fs.stringFlags, flag)
 		}
-		parsed, err := strconv.ParseBool(value)
-		if err != nil {
-			return false, nil, fmt.Errorf("invalid boolean value %q for -%s", value, DisableUsernamePluginFlag)
+	}
+	return fs
+}
+
+func (fs *FlagSet) SplitOwnFlags(args []string) (hasBoolFlags bool, prompt string, newArgs []string, error error) {
+	boolFlagMap := make(map[string]*BoolFlag)
+	for _, f := range fs.boolFlags {
+		boolFlagMap[f.Name] = f
+		for _, alias := range f.Aliases {
+			boolFlagMap[alias] = f
 		}
-		disabled = parsed
+		f.Bool = f.defaultVal
 	}
 
-	return disabled, rest, nil
+	stringFlagMap := make(map[string]*StringFlag)
+	for _, f := range fs.stringFlags {
+		stringFlagMap[f.Name] = f
+		for _, alias := range f.Aliases {
+			stringFlagMap[alias] = f
+		}
+		f.Value = f.defaultVal
+	}
+
+	var newArgList []string
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+
+		if strings.HasPrefix(arg, "-") {
+			if strings.HasPrefix(arg, "--") {
+				parts := strings.SplitN(arg[2:], "=", 2)
+				flagName := parts[0]
+
+				if f, exists := boolFlagMap[flagName]; exists {
+					f.Bool = true
+					i++
+					continue
+				}
+
+				if f, exists := stringFlagMap[flagName]; exists {
+					if len(parts) == 2 {
+						f.Value = parts[1]
+					} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+						f.Value = args[i+1]
+						i++
+					}
+					i++
+					continue
+				}
+			} else {
+				parts := strings.SplitN(arg[1:], "=", 2)
+				flagName := parts[0]
+
+				if f, exists := boolFlagMap[flagName]; exists {
+					f.Bool = true
+					i++
+					continue
+				}
+
+				if f, exists := stringFlagMap[flagName]; exists {
+					if len(parts) == 2 {
+						f.Value = parts[1]
+					} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+						f.Value = args[i+1]
+						i++
+					}
+					i++
+					continue
+				}
+			}
+		}
+
+		newArgList = append(newArgList, arg)
+		i++
+	}
+
+	os.Args = append(os.Args[:1], newArgList...)
+
+	hasAny := false
+	for _, f := range fs.boolFlags {
+		if f.Bool {
+			hasAny = true
+			break
+		}
+	}
+
+	var promptValue string
+	if len(fs.stringFlags) > 0 {
+		promptValue = fs.stringFlags[0].Value
+	}
+
+	return hasAny, promptValue, newArgList, nil
+}
+
+func NewBoolFlag(name string, defaultValue bool) *BoolFlag {
+	return &BoolFlag{
+		Name:       name,
+		defaultVal: defaultValue,
+	}
+}
+
+func NewStringFlag(name string, defaultValue string) *StringFlag {
+	return &StringFlag{
+		Name:       name,
+		defaultVal: defaultValue,
+	}
+}
+
+func (f *BoolFlag) SetAliases(aliases ...string) *BoolFlag {
+	f.Aliases = aliases
+	return f
+}
+
+func (f *StringFlag) SetAliases(aliases ...string) *StringFlag {
+	f.Aliases = aliases
+	return f
+}
+
+func SplitOwnFlags(args []string) (bool, string, []string, error) {
+	flagSet := NewFlagSet(
+		NewBoolFlag("disable-username-plugin", false).SetAliases("disable_username_plugin"),
+		NewStringFlag("prompt", "").SetAliases("prompt_text", "p"),
+	)
+
+	return flagSet.SplitOwnFlags(args)
 }

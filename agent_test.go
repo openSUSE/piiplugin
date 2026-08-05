@@ -35,8 +35,7 @@ func TestGetProcesses(t *testing.T) {
 	ctx := &mockContext{
 		Context: context.Background(),
 	}
-	args := GetProcessesArgs{}
-	res, err := getProcesses(ctx, args)
+	res, err := getProcesses(ctx, struct{}{})
 	if err != nil {
 		t.Fatalf("getProcesses failed: %v", err)
 	}
