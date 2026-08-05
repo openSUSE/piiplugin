@@ -25,6 +25,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/openSUSE/piiplug/utils"
 )
 
 // ProcessInfo represents details of a running process.
@@ -174,9 +176,11 @@ func main() {
 	if err := database.AutoMigrate(sessionService); err != nil {
 		log.Fatalf("Failed to auto-migrate database: %v", err)
 	}
-	usernamePlugin, err := filterusername.NewUsernamePlugin()
+
+	// Consume our own flag, the rest of the arguments belong to the launcher.
+	disableUsernamePlugin, launcherArgs, err := utils.SplitOwnFlags(os.Args[1:])
 	if err != nil {
-		log.Fatalf("Failed to create username plugin: %v", err)
+		log.Fatalf("Failed to parse arguments: %v", err)
 	}
 
 	a, err := llmagent.New(llmagent.Config{
@@ -192,18 +196,26 @@ func main() {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
+	// Build plugin list
+	var plugins []*plugin.Plugin
+	if !disableUsernamePlugin {
+		usernamePlugin, err := filterusername.NewUsernamePlugin()
+		if err != nil {
+			log.Fatalf("Failed to create username plugin: %v", err)
+		}
+		plugins = append(plugins, usernamePlugin)
+	}
+
 	config := &launcher.Config{
 		AgentLoader:    agent.NewSingleLoader(a),
 		SessionService: sessionService,
 		PluginConfig: runner.PluginConfig{
-			Plugins: []*plugin.Plugin{
-				usernamePlugin,
-			},
+			Plugins: plugins,
 		},
 	}
 
 	l := full.NewLauncher()
-	if err := l.Execute(ctx, config, os.Args[1:]); err != nil {
-		log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
+	if err := l.Execute(ctx, config, launcherArgs); err != nil {
+		log.Fatalf("Run failed: %v\n", err)
 	}
 }
