@@ -92,30 +92,19 @@ func NewPiiPlugin(opts ...PiiPluginOption) *plugin.Plugin {
 // redactOrder lists the filters in the order in which data leaving the machine
 // is redacted, unredactOrder the reverse order used for incoming data.
 func (p *PiiPlugin) redactOrder() []*plugin.Plugin {
-	return []*plugin.Plugin{p.eMailPlugin, p.userNamePlugin, p.hostPlugin}
+	return []*plugin.Plugin{p.userNamePlugin, p.eMailPlugin, p.hostPlugin}
 }
 
 func (p *PiiPlugin) unredactOrder() []*plugin.Plugin {
-	return []*plugin.Plugin{p.hostPlugin, p.userNamePlugin, p.eMailPlugin}
+	return []*plugin.Plugin{p.hostPlugin, p.eMailPlugin, p.userNamePlugin}
 }
 
 func (p *PiiPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
-	if p.eMailPlugin != nil {
-		if cb := p.eMailPlugin.BeforeModelCallback(); cb != nil {
-			if resp, err := cb(ctx, req); err != nil || resp != nil {
-				return resp, err
-			}
+	for _, plg := range p.redactOrder() {
+		if plg == nil {
+			continue
 		}
-	}
-	if p.userNamePlugin != nil {
-		if cb := p.userNamePlugin.BeforeModelCallback(); cb != nil {
-			if resp, err := cb(ctx, req); err != nil || resp != nil {
-				return resp, err
-			}
-		}
-	}
-	if p.hostPlugin != nil {
-		if cb := p.hostPlugin.BeforeModelCallback(); cb != nil {
+		if cb := plg.BeforeModelCallback(); cb != nil {
 			if resp, err := cb(ctx, req); err != nil || resp != nil {
 				return resp, err
 			}
@@ -125,26 +114,11 @@ func (p *PiiPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest
 }
 
 func (p *PiiPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
-	if p.hostPlugin != nil {
-		if cb := p.hostPlugin.AfterModelCallback(); cb != nil {
-			if r, e := cb(ctx, resp, err); e != nil {
-				return nil, e
-			} else if r != nil {
-				resp = r
-			}
+	for _, plg := range p.unredactOrder() {
+		if plg == nil {
+			continue
 		}
-	}
-	if p.userNamePlugin != nil {
-		if cb := p.userNamePlugin.AfterModelCallback(); cb != nil {
-			if r, e := cb(ctx, resp, err); e != nil {
-				return nil, e
-			} else if r != nil {
-				resp = r
-			}
-		}
-	}
-	if p.eMailPlugin != nil {
-		if cb := p.eMailPlugin.AfterModelCallback(); cb != nil {
+		if cb := plg.AfterModelCallback(); cb != nil {
 			if r, e := cb(ctx, resp, err); e != nil {
 				return nil, e
 			} else if r != nil {
@@ -217,26 +191,11 @@ func (p *PiiPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map
 
 func (p *PiiPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
 	var resp *model.LLMResponse
-	if p.eMailPlugin != nil {
-		if cb := p.eMailPlugin.OnModelErrorCallback(); cb != nil {
-			if r, e := cb(ctx, req, err); e != nil {
-				return nil, e
-			} else if r != nil {
-				resp = r
-			}
+	for _, plg := range p.redactOrder() {
+		if plg == nil {
+			continue
 		}
-	}
-	if p.userNamePlugin != nil {
-		if cb := p.userNamePlugin.OnModelErrorCallback(); cb != nil {
-			if r, e := cb(ctx, req, err); e != nil {
-				return nil, e
-			} else if r != nil {
-				resp = r
-			}
-		}
-	}
-	if p.hostPlugin != nil {
-		if cb := p.hostPlugin.OnModelErrorCallback(); cb != nil {
+		if cb := plg.OnModelErrorCallback(); cb != nil {
 			if r, e := cb(ctx, req, err); e != nil {
 				return nil, e
 			} else if r != nil {
