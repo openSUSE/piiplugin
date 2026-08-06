@@ -53,4 +53,4 @@ Environment configuration:
 
 ## License
 
-[To be determined]
+MIT
