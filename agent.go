@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	filterusername "github.com/openSUSE/piiplug/filter/username"
+	filterusername "github.com/openSUSE/piirplug/filter/username"
 	"github.com/toon-format/toon-go"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -29,10 +29,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/openSUSE/piiplug/utils"
+	"github.com/openSUSE/piirplug/utils"
 )
 
-// ProcessInfo represents details of a running process.
 type ProcessInfo struct {
 	Pid        int     `json:"pid" toon:"pid" jsonschema:"The unique process ID."`
 	Name       string  `json:"name" toon:"name" jsonschema:"The executable name of the process."`
@@ -43,16 +42,12 @@ type ProcessInfo struct {
 	CpuTimeSec float64 `json:"cpu_time_seconds" toon:"cpu_time_seconds" jsonschema:"Total CPU time (user + system) consumed in seconds."`
 }
 
-// GetProcessesResult is the response of the get_processes tool.
 type GetProcessesResult struct {
 	Processes string `json:"processes" jsonschema:"List of running processes in TOON format."`
 }
 
-// psFormat are the columns requested from ps, in order and without headers.
-// comes last because a command name may contain spaces.
 const psFormat = "pid=,uid=,user=,rss=,vsz=,times=,comm="
 
-// psColumns is the number of columns psFormat asks for.
 const psColumns = 7
 
 func getProcesses(ctx agent.Context, args struct{}) (GetProcessesResult, error) {
@@ -87,8 +82,6 @@ func getProcesses(ctx agent.Context, args struct{}) (GetProcessesResult, error) 
 	return GetProcessesResult{Processes: string(toonBytes)}, nil
 }
 
-// parsePsLine turns one line of ps output, as described by psFormat, into a
-// ProcessInfo. ps reports rss and vsz in kibibytes and times in whole seconds.
 func parsePsLine(line string) (ProcessInfo, error) {
 	fields := strings.Fields(line)
 	if len(fields) < psColumns {
@@ -117,8 +110,7 @@ func parsePsLine(line string) (ProcessInfo, error) {
 	}
 
 	return ProcessInfo{
-		Pid: pid,
-		// Everything past the fixed columns belongs to the command name.
+		Pid:        pid,
 		Name:       strings.Join(fields[psColumns-1:], " "),
 		Uid:        uint32(uid),
 		Username:   fields[2],
@@ -146,7 +138,6 @@ func main() {
 		log.Fatalf("Failed to create model: %v", err)
 	}
 
-	// Define the get_processes tool
 	processesTool, err := functiontool.New(
 		functiontool.Config{
 			Name:        "get_processes",
@@ -181,7 +172,7 @@ func main() {
 		Name:        "system_agent",
 		Model:       model,
 		Description: "Answers questions using an Ollama model.",
-		Instruction: "You are a helpful assistant.",
+		Instruction: "You are a helpful assistant giving information about system you are running on.",
 		Tools: []tool.Tool{
 			processesTool,
 		},

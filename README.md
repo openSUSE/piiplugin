@@ -1,6 +1,6 @@
-# piiPlug
+# piirPlug
 
-**piiPlug** is a PII (Personally Identifiable Information) plug-in system for
+piirPlug is a PII (Personally Identifiable Information) **removal** plugin system for
 [Google ADK](https://google.github.io/adk-docs/) agents. It redacts sensitive
 data before it is sent to the model and restores the original values before they
 reach the tools — so the LLM never sees real user names, hosts or mail
@@ -22,7 +22,7 @@ addresses, while the tools still run against the real system.
 
 ## How it works
 
-piiPlug hooks into the plugin architecture of the ADK and sits between the model
+piirPlug hooks into the plugin architecture of the ADK and sits between the model
 on one side and the user and the tools on the other side. It ships three filters
 that share a common interface and can be used separately or all at once:
 
@@ -34,15 +34,15 @@ that share a common interface and can be used separately or all at once:
 
 Filters that work on a fixed list of names embed `filter.UniqueNamesPlugin`,
 which compiles the list into one case-insensitive regular expression — sorted by
-length descending, so longer names match before their own prefixes — and
+length descending so longer names match before their own prefixes — and
 implements all callbacks. Adding a new list-based filter means collecting the
 names and calling `InitRegex`.
 
 ### The shared replacement table
 
 All filters work on one common replacement table — a `map[string]string` whose
-**key is the generated replacement** and whose **value is the original string**.
-Because the map is passed around as a pointer, every filter can read and extend
+key is the generated replacement and whose value is the original string.
+Since the map is passed around as a pointer, every filter can read and extend
 what the others have already mapped, which keeps redaction and unredaction
 consistent across filters. Mail addresses therefore reuse the replacements the
 user name and host filters have already chosen.
@@ -76,7 +76,7 @@ Data that leaves the machine passes the filters in the order
 ```mermaid
 sequenceDiagram
     participant U as User / Tool
-    participant P as piiPlug
+    participant P as piirPlug
     participant M as LLM
     U->>P: geeko@earth.example.com
     P->>M: icavyast@lifasken.example.com
@@ -87,7 +87,7 @@ sequenceDiagram
 > [!IMPORTANT]
 > `OnToolErrorCallback` has to return a result, and returning one ends the
 > callback chain of the ADK runner. Filters that should redact tool errors
-> together therefore have to be combined with `piiplugin.NewPiiPlugin()` — if
+> together therefore have to be combined with `piirplugin.NewPiirPlugin()` — if
 > they are registered individually with the runner, only the first one sees a
 > tool error.
 
@@ -132,16 +132,16 @@ LLMs. Use `WithTLDSuffix` if you want it replaced as well.
 ### Programmatic (composite plugin)
 
 ```go
-import "github.com/openSUSE/piiplug/piiplugin"
+import "github.com/openSUSE/piirplug/piirplugin"
 
 // All filters enabled, sharing one replacement table.
-plug := piiplugin.NewPiiPlugin()
+plug := piirplugin.NewPiirPlugin()
 
 // Disable individual filters.
-plug = piiplugin.NewPiiPlugin(
-    piiplugin.WithoutEmail(),
-    piiplugin.WithoutHost(),
-    piiplugin.WithoutUsername(),
+plug = piirplugin.NewPiirPlugin(
+    piirplugin.WithoutEmail(),
+    piirplugin.WithoutHost(),
+    piirplugin.WithoutUsername(),
 )
 ```
 
@@ -162,11 +162,12 @@ Every filter can also be created on its own. Pass the same
 
 ```go
 import (
-    filteremail "github.com/openSUSE/piiplug/filter/email"
-    filterhost "github.com/openSUSE/piiplug/filter/host"
-    filterusername "github.com/openSUSE/piiplug/filter/username"
+    filteremail "github.com/openSUSE/piirplug/filter/email"
+    filterhost "github.com/openSUSE/piirplug/filter/host"
+    filterusername "github.com/openSUSE/piirplug/filter/username"
 )
 
+// Can be pre-filled. If key == value is used, the name is "white listed" (not replaced).
 replacements := make(map[string]string)
 
 userPlug, err := filterusername.NewUsernamePlugin(
@@ -191,6 +192,10 @@ mailPlug, err := filteremail.NewEmailPlugin(
 | host | `WithResolver(*net.Resolver)` | Use a custom resolver for all lookups |
 | host | `WithLookupFunc(func(string) ([]string, error))` | Replace the whole host discovery |
 | email | `WithTLDSuffix(map[string]string)` | Map TLDs to replacements; the key `"*"` sets the fallback for all others |
+
+### Disable certain names
+
+In some cases some user names should not be replaced. Although there is no whitelist to filter out names that should not be filtered, this can be achieved by adding them to the replacement table with key == value (these are never replaced).
 
 ### Agent demo
 
@@ -265,9 +270,15 @@ instead of a random name, which keeps test expectations readable.
 - `google.golang.org/genai` — Generative AI SDK
 - `gorm.io/gorm` + `gorm.io/driver/sqlite` — session storage
 - `github.com/toon-format/toon-go` — TOON data format serialisation
+- `github.com/jabenninghoff/apg` — Mirror for automated password generator
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Acknowledgements
+
+This project was developed with the help of different LLMs.
+

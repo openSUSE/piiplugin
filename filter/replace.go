@@ -2,10 +2,12 @@
 package filter
 
 import (
+	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
-	"github.com/openSUSE/piiplug/names"
+	"github.com/openSUSE/piirplug/names"
 )
 
 const minNamelength = 8
@@ -76,7 +78,7 @@ func matchCasing(original, replacement string) string {
 }
 
 // GetReplacement retrieves an existing replacement for original from the shared
-// replacement table, or generates a new, unique pronounceable replacement word.
+// replacement table, or generates a new replacement word.
 //
 // The table is a *map[string]string whose key is the generated replacement and
 // whose value is the original string. Using a pointer to a single map allows the
@@ -139,4 +141,49 @@ func GetReplacement(replacements *map[string]string, original string, fullInput 
 		m[matchedRep] = original
 		return matchedRep
 	}
+}
+
+// UnredactText replaces all occurrences of replacement keys in text with their original values in a single pass.
+func UnredactText(replacements *map[string]string, text string) string {
+	if replacements == nil || len(*replacements) == 0 {
+		return text
+	}
+	m := *replacements
+
+	// Extract and sort keys by length descending to ensure longer patterns match first
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return text
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return len(keys[i]) > len(keys[j])
+	})
+
+	// Build a regex matching any of the keys.
+	// Since keys might contain regex special characters, we must use QuoteMeta.
+	escapedKeys := make([]string, len(keys))
+	for i, k := range keys {
+		escapedKeys[i] = regexp.QuoteMeta(k)
+	}
+	pattern := strings.Join(escapedKeys, "|")
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		// Fallback to serial replacement if regex compilation fails (should never happen for valid QuoteMeta)
+		for _, k := range keys {
+			text = strings.ReplaceAll(text, k, m[k])
+		}
+		return text
+	}
+
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		if orig, ok := m[match]; ok {
+			return orig
+		}
+		return match
+	})
 }

@@ -1,4 +1,4 @@
-// Generate pronounceable random names based on Adel I. Mirzazhanov's apg
+// Package names generates pronounceable random names based on Adel I. Mirzazhanov's apg
 package names
 
 import (

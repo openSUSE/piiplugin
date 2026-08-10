@@ -11,13 +11,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openSUSE/piiplug/filter"
+	"github.com/openSUSE/piirplug/filter"
 	"google.golang.org/adk/v2/plugin"
 )
 
 type UsernamePlugin struct {
 	*filter.UniqueNamesPlugin
-	getpasswdFn  func() ([]string, error)
+	getpasswdFn func() ([]string, error)
 }
 
 // UsernamePluginOption defines the functional option type for UsernamePlugin.

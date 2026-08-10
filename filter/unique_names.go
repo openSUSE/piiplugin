@@ -109,23 +109,7 @@ func (p *UniqueNamesPlugin) BeforeModelCallback(ctx agent.Context, req *model.LL
 
 // UnredactText reverses the redact changes in the response text using the shared replacement table.
 func (p *UniqueNamesPlugin) UnredactText(text string) string {
-	type pair struct {
-		rep  string
-		orig string
-	}
-
-	var pairs []pair
-	for rep, orig := range *p.Replacements {
-		pairs = append(pairs, pair{rep, orig})
-	}
-	sort.Slice(pairs, func(i, j int) bool {
-		return len(pairs[i].rep) > len(pairs[j].rep)
-	})
-	for _, pr := range pairs {
-		text = strings.ReplaceAll(text, pr.rep, pr.orig)
-	}
-
-	return text
+	return UnredactText(p.Replacements, text)
 }
 
 // AfterModelCallback restores the original names in the LLM response.
@@ -183,7 +167,7 @@ func (p *UniqueNamesPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, ar
 // would otherwise pass on to the model as {"error": ...}. Unlike the other tool
 // callbacks this one has to return a result, which ends the callback chain of
 // the runner, so filters that are meant to redact tool errors together have to
-// be combined by piiplugin.NewPiiPlugin instead of being registered
+// be combined by piirplugin.NewPiiPlugin instead of being registered
 // individually.
 func (p *UniqueNamesPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 	if err == nil {
