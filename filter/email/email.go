@@ -1,11 +1,11 @@
+// Package filtereMail is the filter based on regexp for eMail addresses
 package filteremail
 
 import (
 	"regexp"
-	"sort"
 	"strings"
 
-	"github.com/openSUSE/piiplug/filter"
+	"github.com/openSUSE/piirplug/filter"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/plugin"
@@ -209,23 +209,7 @@ func (p *EmailPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMReque
 // replacement table. It sorts the mapped keys by length descending to prevent
 // partial replacements (e.g. combined "segment.suffix" keys before bare segments).
 func (p *EmailPlugin) unredactText(text string) string {
-	type pair struct {
-		rep  string
-		orig string
-	}
-
-	var pairs []pair
-	for rep, orig := range *p.replacements {
-		pairs = append(pairs, pair{rep, orig})
-	}
-	sort.Slice(pairs, func(i, j int) bool {
-		return len(pairs[i].rep) > len(pairs[j].rep)
-	})
-	for _, pr := range pairs {
-		text = strings.ReplaceAll(text, pr.rep, pr.orig)
-	}
-
-	return text
+	return filter.UnredactText(p.replacements, text)
 }
 
 // AfterModelCallback restores the original emails in the LLM response.
@@ -283,7 +267,7 @@ func (p *EmailPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, re
 // would otherwise pass on to the model as {"error": ...}. Unlike the other tool
 // callbacks this one has to return a result, which ends the callback chain of
 // the runner, so filters that are meant to redact tool errors together have to
-// be combined by piiplugin.NewPiiPlugin instead of being registered
+// be combined by piirplugin.NewPiiPlugin instead of being registered
 // individually.
 func (p *EmailPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 	if err == nil {

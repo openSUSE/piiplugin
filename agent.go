@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	filterusername "github.com/openSUSE/piiplug/filter/username"
+	filterusername "github.com/openSUSE/piirplug/filter/username"
 	"github.com/toon-format/toon-go"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -29,7 +29,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/openSUSE/piiplug/utils"
+	"github.com/openSUSE/piirplug/utils"
 )
 
 // ProcessInfo represents details of a running process.
@@ -181,7 +181,7 @@ func main() {
 		Name:        "system_agent",
 		Model:       model,
 		Description: "Answers questions using an Ollama model.",
-		Instruction: "You are a helpful assistant.",
+		Instruction: "You are a helpful assistant giving information about system you are running on.",
 		Tools: []tool.Tool{
 			processesTool,
 		},

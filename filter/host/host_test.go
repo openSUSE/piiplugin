@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openSUSE/piiplug/filter"
+	"github.com/openSUSE/piirplug/filter"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -55,7 +55,7 @@ func TestHostPlugin_RedactAndUnredact(t *testing.T) {
 	}
 
 	inputText := "Connect to mailserver.myoffice.internal or gateway. We also have workstation42 and our internal domain is myoffice.internal."
-	
+
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{

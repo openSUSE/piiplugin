@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openSUSE/piiplug/filter"
+	"github.com/openSUSE/piirplug/filter"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -56,7 +56,7 @@ func TestUsernamePlugin_RedactAndUnredact_CustomGetpasswdFunc(t *testing.T) {
 	}
 
 	inputText := "Hello John, your username is jdoe. Is Alice here? But do not replace Johnathan or DoeMaster. And System must not be replaced."
-	
+
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{
