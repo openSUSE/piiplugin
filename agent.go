@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	filterusername "github.com/openSUSE/piirplug/filter/username"
+	filterusername "github.com/openSUSE/piiplug/filter/username"
 	"github.com/toon-format/toon-go"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -29,7 +29,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/openSUSE/piirplug/utils"
+	"github.com/openSUSE/piiplug/utils"
 )
 
 type ProcessInfo struct {

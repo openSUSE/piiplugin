@@ -1,14 +1,14 @@
-package piirplugin
+package piiplugin
 
 import (
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/openSUSE/piirplug/filter"
-	filteremail "github.com/openSUSE/piirplug/filter/email"
-	filterhost "github.com/openSUSE/piirplug/filter/host"
-	filterusername "github.com/openSUSE/piirplug/filter/username"
+	"github.com/openSUSE/piiplug/filter"
+	filteremail "github.com/openSUSE/piiplug/filter/email"
+	filterhost "github.com/openSUSE/piiplug/filter/host"
+	filterusername "github.com/openSUSE/piiplug/filter/username"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -18,12 +18,12 @@ type mockContext struct {
 	agent.Context
 }
 
-// newTestPiirPlugin builds a PiirPlugin whose three filters share one replacement
+// newTestPiiPlugin builds a PiiPlugin whose three filters share one replacement
 // table and know a fixed set of users and hosts.
-func newTestPiirPlugin(t *testing.T) *PiirPlugin {
+func newTestPiiPlugin(t *testing.T) *PiiPlugin {
 	t.Helper()
 
-	p := &PiirPlugin{}
+	p := &PiiPlugin{}
 	replacements := make(map[string]string)
 
 	emailPlg, err := filteremail.NewEmailPlugin(
@@ -64,13 +64,13 @@ func newTestPiirPlugin(t *testing.T) *PiirPlugin {
 	return p
 }
 
-func TestPiirPlugin_Integration(t *testing.T) {
+func TestPiiPlugin_Integration(t *testing.T) {
 	filter.UseMock = true
 	defer func() {
 		filter.UseMock = false
 	}()
 
-	p := newTestPiirPlugin(t)
+	p := newTestPiiPlugin(t)
 
 	// Create request containing email, username, and hostname
 	req := &model.LLMRequest{
@@ -126,16 +126,16 @@ func TestPiirPlugin_Integration(t *testing.T) {
 	}
 }
 
-// TestPiirPlugin_ToolCallbacks verifies that a tool result, which reaches the
+// TestPiiPlugin_ToolCallbacks verifies that a tool result, which reaches the
 // model as a FunctionResponse and not as text, is redacted by all filters and
 // that the arguments of the next tool call are restored again.
-func TestPiirPlugin_ToolCallbacks(t *testing.T) {
+func TestPiiPlugin_ToolCallbacks(t *testing.T) {
 	filter.UseMock = true
 	defer func() {
 		filter.UseMock = false
 	}()
 
-	p := newTestPiirPlugin(t)
+	p := newTestPiiPlugin(t)
 	ctx := &mockContext{}
 	args := map[string]any{}
 
@@ -197,15 +197,15 @@ func TestPiirPlugin_ToolCallbacks(t *testing.T) {
 	}
 }
 
-// TestPiirPlugin_OnToolErrorCallback makes sure a failing tool does not leak the
+// TestPiiPlugin_OnToolErrorCallback makes sure a failing tool does not leak the
 // data through its error message.
-func TestPiirPlugin_OnToolErrorCallback(t *testing.T) {
+func TestPiiPlugin_OnToolErrorCallback(t *testing.T) {
 	filter.UseMock = true
 	defer func() {
 		filter.UseMock = false
 	}()
 
-	p := newTestPiirPlugin(t)
+	p := newTestPiiPlugin(t)
 
 	result, err := p.OnToolErrorCallback(&mockContext{}, nil,
 		map[string]any{}, errors.New("cannot reach mailserver.myoffice.internal as Bob"))
@@ -222,23 +222,23 @@ func TestPiirPlugin_OnToolErrorCallback(t *testing.T) {
 	}
 }
 
-func TestPiirPlugin_Options(t *testing.T) {
+func TestPiiPlugin_Options(t *testing.T) {
 	// 1. Without Email option
-	p1 := &PiirPlugin{}
+	p1 := &PiiPlugin{}
 	WithoutEmail()(p1)
 	if !p1.noEMail {
 		t.Error("noEMail should be true when WithoutEmail() is used")
 	}
 
 	// 2. Without Username option
-	p2 := &PiirPlugin{}
+	p2 := &PiiPlugin{}
 	WithoutUsername()(p2)
 	if !p2.noUserName {
 		t.Error("noUserName should be true when WithoutUsername() is used")
 	}
 
 	// 3. Without Host option
-	p3 := &PiirPlugin{}
+	p3 := &PiiPlugin{}
 	WithoutHost()(p3)
 	if !p3.noHost {
 		t.Error("noHost should be true when WithoutHost() is used")

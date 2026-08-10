@@ -1,6 +1,6 @@
-# piirPlug
+# piiPlug
 
-piirPlug is a PII (Personally Identifiable Information) **removal** plugin system for
+piiPlug is a PII (Personally Identifiable Information) **removal** plugin system for
 [Google ADK](https://google.github.io/adk-docs/) agents. It redacts sensitive
 data before it is sent to the model and restores the original values before they
 reach the tools — so the LLM never sees real user names, hosts or mail
@@ -22,7 +22,7 @@ addresses, while the tools still run against the real system.
 
 ## How it works
 
-piirPlug hooks into the plugin architecture of the ADK and sits between the model
+piiPlug hooks into the plugin architecture of the ADK and sits between the model
 on one side and the user and the tools on the other side. It ships three filters
 that share a common interface and can be used separately or all at once:
 
@@ -76,7 +76,7 @@ Data that leaves the machine passes the filters in the order
 ```mermaid
 sequenceDiagram
     participant U as User / Tool
-    participant P as piirPlug
+    participant P as piiPlug
     participant M as LLM
     U->>P: geeko@earth.example.com
     P->>M: icavyast@lifasken.example.com
@@ -87,7 +87,7 @@ sequenceDiagram
 > [!IMPORTANT]
 > `OnToolErrorCallback` has to return a result, and returning one ends the
 > callback chain of the ADK runner. Filters that should redact tool errors
-> together therefore have to be combined with `piirplugin.NewPiirPlugin()` — if
+> together therefore have to be combined with `piiplugin.NewPiiPlugin()` — if
 > they are registered individually with the runner, only the first one sees a
 > tool error.
 
@@ -132,16 +132,16 @@ LLMs. Use `WithTLDSuffix` if you want it replaced as well.
 ### Programmatic (composite plugin)
 
 ```go
-import "github.com/openSUSE/piirplug/piirplugin"
+import "github.com/openSUSE/piiplug/piiplugin"
 
 // All filters enabled, sharing one replacement table.
-plug := piirplugin.NewPiirPlugin()
+plug := piiplugin.NewPiiPlugin()
 
 // Disable individual filters.
-plug = piirplugin.NewPiirPlugin(
-    piirplugin.WithoutEmail(),
-    piirplugin.WithoutHost(),
-    piirplugin.WithoutUsername(),
+plug = piiplugin.NewPiiPlugin(
+    piiplugin.WithoutEmail(),
+    piiplugin.WithoutHost(),
+    piiplugin.WithoutUsername(),
 )
 ```
 
@@ -162,9 +162,9 @@ Every filter can also be created on its own. Pass the same
 
 ```go
 import (
-    filteremail "github.com/openSUSE/piirplug/filter/email"
-    filterhost "github.com/openSUSE/piirplug/filter/host"
-    filterusername "github.com/openSUSE/piirplug/filter/username"
+    filteremail "github.com/openSUSE/piiplug/filter/email"
+    filterhost "github.com/openSUSE/piiplug/filter/host"
+    filterusername "github.com/openSUSE/piiplug/filter/username"
 )
 
 // Can be pre-filled. If key == value is used, the name is "white listed" (not replaced).

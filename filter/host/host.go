@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openSUSE/piirplug/filter"
+	"github.com/openSUSE/piiplug/filter"
 	"google.golang.org/adk/v2/plugin"
 )
 

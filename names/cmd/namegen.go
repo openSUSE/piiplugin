@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/openSUSE/piirplug/names"
+	"github.com/openSUSE/piiplug/names"
 )
 
 func main() {

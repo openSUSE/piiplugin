@@ -1,4 +1,4 @@
-module github.com/openSUSE/piirplug
+module github.com/openSUSE/piiplug
 
 go 1.26.5
 

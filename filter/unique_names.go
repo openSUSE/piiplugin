@@ -167,7 +167,7 @@ func (p *UniqueNamesPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, ar
 // would otherwise pass on to the model as {"error": ...}. Unlike the other tool
 // callbacks this one has to return a result, which ends the callback chain of
 // the runner, so filters that are meant to redact tool errors together have to
-// be combined by piirplugin.NewPiiPlugin instead of being registered
+// be combined by piiplugin.NewPiiPlugin instead of being registered
 // individually.
 func (p *UniqueNamesPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 	if err == nil {

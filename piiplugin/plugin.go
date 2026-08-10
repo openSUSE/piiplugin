@@ -1,18 +1,18 @@
-package piirplugin
+package piiplugin
 
 import (
-	filteremail "github.com/openSUSE/piirplug/filter/email"
-	filterhost "github.com/openSUSE/piirplug/filter/host"
-	filterusername "github.com/openSUSE/piirplug/filter/username"
+	filteremail "github.com/openSUSE/piiplug/filter/email"
+	filterhost "github.com/openSUSE/piiplug/filter/host"
+	filterusername "github.com/openSUSE/piiplug/filter/username"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/plugin"
 	"google.golang.org/adk/v2/tool"
 )
 
-type PiirPluginOption func(*PiirPlugin)
+type PiiPluginOption func(*PiiPlugin)
 
-type PiirPlugin struct {
+type PiiPlugin struct {
 	noEMail        bool
 	noUserName     bool
 	noHost         bool
@@ -21,26 +21,26 @@ type PiirPlugin struct {
 	hostPlugin     *plugin.Plugin
 }
 
-func WithoutEmail() PiirPluginOption {
-	return func(cfg *PiirPlugin) {
+func WithoutEmail() PiiPluginOption {
+	return func(cfg *PiiPlugin) {
 		cfg.noEMail = true
 	}
 }
 
-func WithoutUsername() PiirPluginOption {
-	return func(cfg *PiirPlugin) {
+func WithoutUsername() PiiPluginOption {
+	return func(cfg *PiiPlugin) {
 		cfg.noUserName = true
 	}
 }
 
-func WithoutHost() PiirPluginOption {
-	return func(cfg *PiirPlugin) {
+func WithoutHost() PiiPluginOption {
+	return func(cfg *PiiPlugin) {
 		cfg.noHost = true
 	}
 }
 
-func NewPiirPlugin(opts ...PiirPluginOption) *plugin.Plugin {
-	p := &PiirPlugin{}
+func NewPiiPlugin(opts ...PiiPluginOption) *plugin.Plugin {
+	p := &PiiPlugin{}
 	for _, o := range opts {
 		o(p)
 	}
@@ -79,15 +79,15 @@ func NewPiirPlugin(opts ...PiirPluginOption) *plugin.Plugin {
 
 // redactOrder lists the filters in the order in which data leaving the machine
 // is redacted, unredactOrder the reverse order used for incoming data.
-func (p *PiirPlugin) redactOrder() []*plugin.Plugin {
+func (p *PiiPlugin) redactOrder() []*plugin.Plugin {
 	return []*plugin.Plugin{p.userNamePlugin, p.eMailPlugin, p.hostPlugin}
 }
 
-func (p *PiirPlugin) unredactOrder() []*plugin.Plugin {
+func (p *PiiPlugin) unredactOrder() []*plugin.Plugin {
 	return []*plugin.Plugin{p.hostPlugin, p.eMailPlugin, p.userNamePlugin}
 }
 
-func (p *PiirPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
+func (p *PiiPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
 	for _, plg := range p.redactOrder() {
 		if plg == nil {
 			continue
@@ -101,7 +101,7 @@ func (p *PiirPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMReques
 	return nil, nil
 }
 
-func (p *PiirPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
+func (p *PiiPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
 	for _, plg := range p.unredactOrder() {
 		if plg == nil {
 			continue
@@ -121,7 +121,7 @@ func (p *PiirPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMRespon
 // the tool runs against the real system instead of against the replacements the
 // model has seen. The filters update the arguments in place, so a nil result is
 // returned and the tool call itself still happens.
-func (p *PiirPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+func (p *PiiPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
 	for _, plg := range p.unredactOrder() {
 		if plg == nil {
 			continue
@@ -139,7 +139,7 @@ func (p *PiirPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map
 // BeforeToolCallback, before they are sent to the model. Neither of them is
 // part of the model request contents as text, so the filters have to be applied
 // here as well.
-func (p *PiirPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
+func (p *PiiPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
 	redacted, replaced := result, false
 	for _, plg := range p.redactOrder() {
 		if plg == nil {
@@ -164,7 +164,7 @@ func (p *PiirPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, res
 // OnToolErrorCallback redacts the message of a failed tool call. The flow turns
 // a tool error into an {"error": ...} result for the model anyway, so that
 // result is built here and redacted by every filter.
-func (p *PiirPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
+func (p *PiiPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 	if err == nil {
 		return nil, nil
 	}
@@ -177,7 +177,7 @@ func (p *PiirPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args ma
 	return result, nil
 }
 
-func (p *PiirPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
+func (p *PiiPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
 	var resp *model.LLMResponse
 	for _, plg := range p.redactOrder() {
 		if plg == nil {

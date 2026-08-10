@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openSUSE/piirplug/filter"
+	"github.com/openSUSE/piiplug/filter"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
