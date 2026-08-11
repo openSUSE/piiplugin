@@ -12,12 +12,18 @@ import (
 
 // UniqueNamesPlugin manages a shared replacement table and performs
 // redaction and unredaction on a list of unique names/strings.
+//
+// The regex field stores the compiled regular expression used for matching
+// names in text. It is initialized by NewUniqueNamesPlugin or InitRegex.
+// A nil regex means no matching will be performed.
 type UniqueNamesPlugin struct {
 	Replacements *map[string]string
-	Regex        *regexp.Regexp
+	regex        *regexp.Regexp
 }
 
 // NewUniqueNamesPlugin creates a new UniqueNamesPlugin with the given options and name list.
+// It initializes the regex field by calling InitRegex with the provided names.
+// The Replacements map is either taken from the argument or created fresh if nil.
 func NewUniqueNamesPlugin(replacements *map[string]string, names []string) (*UniqueNamesPlugin, error) {
 	p := &UniqueNamesPlugin{
 		Replacements: replacements,
@@ -34,10 +40,15 @@ func NewUniqueNamesPlugin(replacements *map[string]string, names []string) (*Uni
 	return p, nil
 }
 
-// InitRegex builds the regular expression from the given list of names.
+// InitRegex builds and compiles the regular expression from the given list of names.
+// It replaces any previously compiled regex in p.regex. The regex matches are
+// case-insensitive and use word boundaries to ensure exact matches only.
+//
+// Names are sorted by length descending so that longer names match before their prefixes.
+// If names is empty, p.regex is set to nil.
 func (p *UniqueNamesPlugin) InitRegex(names []string) error {
 	if len(names) == 0 {
-		p.Regex = nil
+		p.regex = nil
 		return nil
 	}
 	escaped := make([]string, len(names))
@@ -51,7 +62,7 @@ func (p *UniqueNamesPlugin) InitRegex(names []string) error {
 
 	pattern := `\b(` + strings.Join(escaped, "|") + `)\b`
 	var err error
-	p.Regex, err = regexp.Compile("(?i)" + pattern)
+	p.regex, err = regexp.Compile("(?i)" + pattern)
 	return err
 }
 
@@ -78,10 +89,10 @@ func getFullInputText(req *model.LLMRequest) string {
 }
 
 func (p *UniqueNamesPlugin) RedactUniqueNames(text string, fullInput string) string {
-	if p.Regex == nil {
+	if p.regex == nil {
 		return text
 	}
-	return p.Regex.ReplaceAllStringFunc(text, func(match string) string {
+	return p.regex.ReplaceAllStringFunc(text, func(match string) string {
 		return GetReplacement(p.Replacements, match, fullInput)
 	})
 }

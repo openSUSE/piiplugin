@@ -9,6 +9,7 @@ import "C"
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/openSUSE/piiplug/filter"
@@ -17,7 +18,8 @@ import (
 
 type UsernamePlugin struct {
 	*filter.UniqueNamesPlugin
-	getpasswdFn func() ([]string, error)
+	getpasswdFn    func() ([]string, error)
+	isSystemUserFn func(id int) bool
 }
 
 // UsernamePluginOption defines the functional option type for UsernamePlugin.
@@ -40,6 +42,14 @@ func WithReplacement(replacements *map[string]string) UsernamePluginOption {
 func WithGetpasswdFunc(fn func() ([]string, error)) UsernamePluginOption {
 	return func(p *UsernamePlugin) {
 		p.getpasswdFn = fn
+	}
+}
+
+// WithIsSystemUserFunc allows replacing the default function that identifies system users.
+// The function receives a user ID and returns true if it's a system user (should be excluded).
+func WithIsSystemUserFunc(fn func(id int) bool) UsernamePluginOption {
+	return func(p *UsernamePlugin) {
+		p.isSystemUserFn = fn
 	}
 }
 
@@ -83,7 +93,7 @@ func FetchCgoPasswd() ([]string, error) {
 }
 
 // parsePasswdEntries extracts usernames and individual GECOS names from passwd-compatible lines.
-func parsePasswdEntries(entries []string) []string {
+func parsePasswdEntries(entries []string, isSystemUser func(id int) bool) []string {
 	var names []string
 	for _, entry := range entries {
 		parts := strings.Split(entry, ":")
@@ -94,13 +104,13 @@ func parsePasswdEntries(entries []string) []string {
 		uidStr := parts[2]
 		gecos := parts[4]
 
-		var uid uint32
-		if _, err := fmt.Sscanf(uidStr, "%d", &uid); err != nil {
+		uidInt, err := strconv.Atoi(uidStr)
+		if err != nil {
 			continue
 		}
 
 		// Don't replace system users (regular users have UID >= 1000)
-		if uid < 1000 {
+		if isSystemUser(uidInt) {
 			continue
 		}
 
@@ -123,8 +133,14 @@ func parsePasswdEntries(entries []string) []string {
 				names = append(names, f)
 			}
 		}
-	}
+		}
 	return uniqueNames(names)
+}
+
+// IsSystemUserDefault is the default function to identify system users.
+// It returns true if uid < 1000.
+func IsSystemUserDefault(id int) bool {
+	return id < 1000
 }
 
 // NewUsernamePlugin creates a new instance of the username filter plugin.
@@ -151,7 +167,11 @@ func NewUsernamePlugin(opts ...UsernamePluginOption) (*plugin.Plugin, error) {
 		return nil, err
 	}
 
-	names := parsePasswdEntries(entries)
+	if p.isSystemUserFn == nil {
+		p.isSystemUserFn = IsSystemUserDefault
+	}
+
+	names := parsePasswdEntries(entries, p.isSystemUserFn)
 
 	err = p.UniqueNamesPlugin.InitRegex(names)
 	if err != nil {

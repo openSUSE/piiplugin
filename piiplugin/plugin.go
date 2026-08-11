@@ -127,7 +127,7 @@ func (p *PiiPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[
 			continue
 		}
 		if cb := plg.BeforeToolCallback(); cb != nil {
-			if res, err := cb(ctx, t, args); err != nil || res != nil {
+			if res, err := cb(ctx, t, args); err != nil {
 				return res, err
 			}
 		}
@@ -140,23 +140,19 @@ func (p *PiiPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[
 // part of the model request contents as text, so the filters have to be applied
 // here as well.
 func (p *PiiPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
-	redacted, replaced := result, false
 	for _, plg := range p.redactOrder() {
 		if plg == nil {
 			continue
 		}
 		if cb := plg.AfterToolCallback(); cb != nil {
-			r, e := cb(ctx, t, args, redacted, err)
+			r, e := cb(ctx, t, args, result, err)
 			if e != nil {
 				return nil, e
 			}
 			if r != nil {
-				redacted, replaced = r, true
+				return r, nil
 			}
 		}
-	}
-	if replaced {
-		return redacted, nil
 	}
 	return nil, nil
 }
@@ -164,6 +160,11 @@ func (p *PiiPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, resu
 // OnToolErrorCallback redacts the message of a failed tool call. The flow turns
 // a tool error into an {"error": ...} result for the model anyway, so that
 // result is built here and redacted by every filter.
+//
+// Note: The callback returns (map[string]any, nil) not (nil, error) because
+// ADK's OnToolErrorCallback must return a map for the LLM response content;
+// tool errors are communicated to the model via result maps containing an
+// "error" key, not via Go errors.
 func (p *PiiPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 	if err == nil {
 		return nil, nil
@@ -177,6 +178,9 @@ func (p *PiiPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map
 	return result, nil
 }
 
+// OnModelErrorCallback is a pass-through for model errors. It delegates to the
+// underlying filters in redact order; the individual filters do not modify error
+// handling, so this callback effectively returns nil.
 func (p *PiiPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
 	var resp *model.LLMResponse
 	for _, plg := range p.redactOrder() {
