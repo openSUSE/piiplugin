@@ -1,6 +1,6 @@
-# piiPlug
+# piiPlugin
 
-piiPlug is a PII (Personally Identifiable Information) **removal** plugin system for
+piiPlugin is a PII (Personally Identifiable Information) **removal** plugin system for
 [Google ADK](https://google.github.io/adk-docs/) agents. It redacts sensitive
 data before it is sent to the model and restores the original values before they
 reach the tools — so the LLM never sees real user names, hosts or mail
@@ -22,7 +22,7 @@ addresses, while the tools still run against the real system.
 
 ## How it works
 
-piiPlug hooks into the plugin architecture of the ADK and sits between the model
+piiPlugin hooks into the plugin architecture of the ADK and sits between the model
 on one side and the user and the tools on the other side. It ships three filters
 that share a common interface and can be used separately or all at once:
 
@@ -76,7 +76,7 @@ Data that leaves the machine passes the filters in the order
 ```mermaid
 sequenceDiagram
     participant U as User / Tool
-    participant P as piiPlug
+    participant P as piiPlugin
     participant M as LLM
     U->>P: geeko@earth.example.com
     P->>M: icavyast@lifasken.example.com
