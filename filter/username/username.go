@@ -16,40 +16,43 @@ import (
 	"google.golang.org/adk/v2/plugin"
 )
 
-type UsernamePlugin struct {
-	*filter.UniqueNamesPlugin
+// UsernameFilter is the pure Go non-ADK filter engine.
+type UsernameFilter struct {
+	*filter.UniqueNamesFilter
 	getpasswdFn    func() ([]string, error)
 	isSystemUserFn func(id int) bool
 }
 
-// UsernamePluginOption defines the functional option type for UsernamePlugin.
-type UsernamePluginOption func(*UsernamePlugin)
+// Option defines the functional option type for UsernameFilter.
+type Option func(*UsernameFilter)
 
-// WithReplacement sets a prefilled replacement table for UsernamePlugin.
-// Passing a shared *map[string]string lets multiple filters use and extend the
-// same replacement table, so that redaction and unredaction stay consistent
-// across filters. The key is the generated replacement, the value the original.
-func WithReplacement(replacements *map[string]string) UsernamePluginOption {
-	return func(p *UsernamePlugin) {
+// UsernamePluginOption is a type alias for Option to maintain backward compatibility.
+type UsernamePluginOption = Option
+
+// WithReplacement sets a prefilled replacement table for UsernameFilter.
+func WithReplacement(replacements *map[string]string) Option {
+	return func(u *UsernameFilter) {
 		if replacements != nil {
-			p.Replacements = replacements
+			if u.UniqueNamesFilter == nil {
+				u.UniqueNamesFilter = &filter.UniqueNamesFilter{}
+			}
+			u.Replacements = replacements
 		}
 	}
 }
 
 // WithGetpasswdFunc allows replacing the default user retrieval (CGO getpwent) with a
 // custom function that returns passwd/gecos compatible colon-separated entries.
-func WithGetpasswdFunc(fn func() ([]string, error)) UsernamePluginOption {
-	return func(p *UsernamePlugin) {
-		p.getpasswdFn = fn
+func WithGetpasswdFunc(fn func() ([]string, error)) Option {
+	return func(u *UsernameFilter) {
+		u.getpasswdFn = fn
 	}
 }
 
 // WithIsSystemUserFunc allows replacing the default function that identifies system users.
-// The function receives a user ID and returns true if it's a system user (should be excluded).
-func WithIsSystemUserFunc(fn func(id int) bool) UsernamePluginOption {
-	return func(p *UsernamePlugin) {
-		p.isSystemUserFn = fn
+func WithIsSystemUserFunc(fn func(id int) bool) Option {
+	return func(u *UsernameFilter) {
+		u.isSystemUserFn = fn
 	}
 }
 
@@ -133,51 +136,64 @@ func parsePasswdEntries(entries []string, isSystemUser func(id int) bool) []stri
 				names = append(names, f)
 			}
 		}
-		}
+	}
 	return uniqueNames(names)
 }
 
 // IsSystemUserDefault is the default function to identify system users.
-// It returns true if uid < 1000.
 func IsSystemUserDefault(id int) bool {
 	return id < 1000
 }
 
-// NewUsernamePlugin creates a new instance of the username filter plugin.
-func NewUsernamePlugin(opts ...UsernamePluginOption) (*plugin.Plugin, error) {
-	p := &UsernamePlugin{
-		UniqueNamesPlugin: &filter.UniqueNamesPlugin{},
-	}
+// NewUsernameFilter creates a new instance of the decoupled UsernameFilter.
+func NewUsernameFilter(opts ...Option) (*UsernameFilter, error) {
+	u := &UsernameFilter{}
 	for _, opt := range opts {
-		opt(p)
+		opt(u)
 	}
 
-	if p.Replacements == nil {
+	if u.UniqueNamesFilter == nil {
 		m := make(map[string]string)
-		p.Replacements = &m
+		f, err := filter.NewUniqueNamesFilter(&m, nil)
+		if err != nil {
+			return nil, err
+		}
+		u.UniqueNamesFilter = f
 	}
 
 	// Fetch from CGO if no custom function is provided
-	if p.getpasswdFn == nil {
-		p.getpasswdFn = FetchCgoPasswd
+	if u.getpasswdFn == nil {
+		u.getpasswdFn = FetchCgoPasswd
 	}
 
-	entries, err := p.getpasswdFn()
+	entries, err := u.getpasswdFn()
 	if err != nil {
 		return nil, err
 	}
 
-	if p.isSystemUserFn == nil {
-		p.isSystemUserFn = IsSystemUserDefault
+	if u.isSystemUserFn == nil {
+		u.isSystemUserFn = IsSystemUserDefault
 	}
 
-	names := parsePasswdEntries(entries, p.isSystemUserFn)
+	names := parsePasswdEntries(entries, u.isSystemUserFn)
 
-	err = p.UniqueNamesPlugin.InitRegex(names)
+	err = u.UniqueNamesFilter.InitRegex(names)
 	if err != nil {
 		return nil, err
 	}
 
+	return u, nil
+}
+
+// NewUsernamePlugin creates a new instance of the username filter plugin.
+func NewUsernamePlugin(opts ...Option) (*plugin.Plugin, error) {
+	f, err := NewUsernameFilter(opts...)
+	if err != nil {
+		return nil, err
+	}
+	p := &filter.UniqueNamesPlugin{
+		UniqueNamesFilter: *f.UniqueNamesFilter,
+	}
 	return plugin.New(plugin.Config{
 		Name:                 "username_plugin",
 		BeforeModelCallback:  p.BeforeModelCallback,

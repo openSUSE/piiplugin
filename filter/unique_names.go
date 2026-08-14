@@ -10,45 +10,26 @@ import (
 	"google.golang.org/adk/v2/tool"
 )
 
-// UniqueNamesPlugin manages a shared replacement table and performs
-// redaction and unredaction on a list of unique names/strings.
-//
-// The regex field stores the compiled regular expression used for matching
-// names in text. It is initialized by NewUniqueNamesPlugin or InitRegex.
-// A nil regex means no matching will be performed.
-type UniqueNamesPlugin struct {
+type UniqueNamesFilter struct {
 	Replacements *map[string]string
-	regex        *regexp.Regexp
+	Regex        *regexp.Regexp
 }
 
-// NewUniqueNamesPlugin creates a new UniqueNamesPlugin with the given options and name list.
-// It initializes the regex field by calling InitRegex with the provided names.
-// The Replacements map is either taken from the argument or created fresh if nil.
-func NewUniqueNamesPlugin(replacements *map[string]string, names []string) (*UniqueNamesPlugin, error) {
-	p := &UniqueNamesPlugin{
-		Replacements: replacements,
-	}
-	if p.Replacements == nil {
+func NewUniqueNamesFilter(replacements *map[string]string, names []string) (*UniqueNamesFilter, error) {
+	f := &UniqueNamesFilter{Replacements: replacements}
+	if f.Replacements == nil {
 		m := make(map[string]string)
-		p.Replacements = &m
+		f.Replacements = &m
 	}
-
-	if err := p.InitRegex(names); err != nil {
+	if err := f.InitRegex(names); err != nil {
 		return nil, err
 	}
-
-	return p, nil
+	return f, nil
 }
 
-// InitRegex builds and compiles the regular expression from the given list of names.
-// It replaces any previously compiled regex in p.regex. The regex matches are
-// case-insensitive and use word boundaries to ensure exact matches only.
-//
-// Names are sorted by length descending so that longer names match before their prefixes.
-// If names is empty, p.regex is set to nil.
-func (p *UniqueNamesPlugin) InitRegex(names []string) error {
+func (f *UniqueNamesFilter) InitRegex(names []string) error {
 	if len(names) == 0 {
-		p.regex = nil
+		f.Regex = nil
 		return nil
 	}
 	escaped := make([]string, len(names))
@@ -62,8 +43,38 @@ func (p *UniqueNamesPlugin) InitRegex(names []string) error {
 
 	pattern := `\b(` + strings.Join(escaped, "|") + `)\b`
 	var err error
-	p.regex, err = regexp.Compile("(?i)" + pattern)
+	f.Regex, err = regexp.Compile("(?i)" + pattern)
 	return err
+}
+
+func (f *UniqueNamesFilter) Redact(text string, fullInput string) string {
+	if f.Regex == nil {
+		return text
+	}
+	return f.Regex.ReplaceAllStringFunc(text, func(match string) string {
+		return GetReplacement(f.Replacements, match, fullInput)
+	})
+}
+
+func (f *UniqueNamesFilter) Unredact(text string) string {
+	return UnredactText(f.Replacements, text)
+}
+
+// UniqueNamesPlugin manages a shared replacement table and performs
+// redaction and unredaction on a list of unique names/strings.
+type UniqueNamesPlugin struct {
+	UniqueNamesFilter
+}
+
+// NewUniqueNamesPlugin creates a new UniqueNamesPlugin with the given options and name list.
+// It initializes the regex field by calling InitRegex with the provided names.
+// The Replacements map is either taken from the argument or created fresh if nil.
+func NewUniqueNamesPlugin(replacements *map[string]string, names []string) (*UniqueNamesPlugin, error) {
+	f, err := NewUniqueNamesFilter(replacements, names)
+	if err != nil {
+		return nil, err
+	}
+	return &UniqueNamesPlugin{UniqueNamesFilter: *f}, nil
 }
 
 // getFullInputText gathers all text from the LLMRequest contents to verify that generated replacements
@@ -89,12 +100,7 @@ func getFullInputText(req *model.LLMRequest) string {
 }
 
 func (p *UniqueNamesPlugin) RedactUniqueNames(text string, fullInput string) string {
-	if p.regex == nil {
-		return text
-	}
-	return p.regex.ReplaceAllStringFunc(text, func(match string) string {
-		return GetReplacement(p.Replacements, match, fullInput)
-	})
+	return p.Redact(text, fullInput)
 }
 
 // BeforeModelCallback intercepts the model request and redacts all found unique names.
@@ -120,7 +126,7 @@ func (p *UniqueNamesPlugin) BeforeModelCallback(ctx agent.Context, req *model.LL
 
 // UnredactText reverses the redact changes in the response text using the shared replacement table.
 func (p *UniqueNamesPlugin) UnredactText(text string) string {
-	return UnredactText(p.Replacements, text)
+	return p.Unredact(text)
 }
 
 // AfterModelCallback restores the original names in the LLM response.
@@ -142,25 +148,13 @@ func (p *UniqueNamesPlugin) OnModelErrorCallback(ctx agent.Context, req *model.L
 	return nil, nil
 }
 
-// BeforeToolCallback restores the original names in the tool arguments. The
-// model only ever sees the replacements, so the arguments it derives from them
-// would not match anything on the machine the tool runs on. The arguments are
-// updated in place and a nil result is returned, which keeps both the tool call
-// itself and the callbacks of the remaining filters alive.
+// BeforeToolCallback restores the original names in the tool arguments.
 func (p *UniqueNamesPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
 	MapToolValues(args, p.UnredactText)
 	return nil, nil
 }
 
 // AfterToolCallback redacts the tool result before it is handed to the model.
-// A tool result travels as a FunctionResponse part, which carries its payload
-// in a map and therefore never passes the text redaction of
-// BeforeModelCallback.
-//
-// The arguments are redacted again as well. BeforeToolCallback restored them
-// for the tool run, but they belong to the function call of the model, which
-// stays in the session and is sent to the model again with every following
-// request.
 func (p *UniqueNamesPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
 	fullInput := ToolValuesText(args) + ToolValuesText(result)
 	redact := func(text string) string {
@@ -174,12 +168,7 @@ func (p *UniqueNamesPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, ar
 	return nil, nil
 }
 
-// OnToolErrorCallback redacts the message of a failed tool call, which the flow
-// would otherwise pass on to the model as {"error": ...}. Unlike the other tool
-// callbacks this one has to return a result, which ends the callback chain of
-// the runner, so filters that are meant to redact tool errors together have to
-// be combined by piiplugin.NewPiiPlugin instead of being registered
-// individually.
+// OnToolErrorCallback redacts the message of a failed tool call.
 func (p *UniqueNamesPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
 	if err == nil {
 		return nil, nil

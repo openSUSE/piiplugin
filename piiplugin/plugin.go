@@ -10,7 +10,14 @@ import (
 	"google.golang.org/adk/v2/tool"
 )
 
-type PiiPluginOption func(*PiiPlugin)
+// Configurer defines an interface for configuring PII filters.
+type Configurer interface {
+	SetWithoutEmail(bool)
+	SetWithoutUsername(bool)
+	SetWithoutHost(bool)
+}
+
+type PiiPluginOption func(Configurer)
 
 type PiiPlugin struct {
 	noEMail        bool
@@ -21,22 +28,112 @@ type PiiPlugin struct {
 	hostPlugin     *plugin.Plugin
 }
 
+func (p *PiiPlugin) SetWithoutEmail(v bool) {
+	p.noEMail = v
+}
+
+func (p *PiiPlugin) SetWithoutUsername(v bool) {
+	p.noUserName = v
+}
+
+func (p *PiiPlugin) SetWithoutHost(v bool) {
+	p.noHost = v
+}
+
 func WithoutEmail() PiiPluginOption {
-	return func(cfg *PiiPlugin) {
-		cfg.noEMail = true
+	return func(cfg Configurer) {
+		cfg.SetWithoutEmail(true)
 	}
 }
 
 func WithoutUsername() PiiPluginOption {
-	return func(cfg *PiiPlugin) {
-		cfg.noUserName = true
+	return func(cfg Configurer) {
+		cfg.SetWithoutUsername(true)
 	}
 }
 
 func WithoutHost() PiiPluginOption {
-	return func(cfg *PiiPlugin) {
-		cfg.noHost = true
+	return func(cfg Configurer) {
+		cfg.SetWithoutHost(true)
 	}
+}
+
+type PiiFilter struct {
+	noEMail        bool
+	noUserName     bool
+	noHost         bool
+	EmailFilter    *filteremail.EmailFilter
+	HostFilter     *filterhost.HostFilter
+	UsernameFilter *filterusername.UsernameFilter
+}
+
+func (f *PiiFilter) SetWithoutEmail(v bool) {
+	f.noEMail = v
+}
+
+func (f *PiiFilter) SetWithoutUsername(v bool) {
+	f.noUserName = v
+}
+
+func (f *PiiFilter) SetWithoutHost(v bool) {
+	f.noHost = v
+}
+
+func NewPiiFilter(opts ...PiiPluginOption) *PiiFilter {
+	f := &PiiFilter{}
+	for _, o := range opts {
+		o(f)
+	}
+
+	replacements := make(map[string]string)
+
+	if !f.noEMail {
+		f.EmailFilter = filteremail.NewEmailFilter(
+			filteremail.WithReplacement(&replacements),
+		)
+	}
+
+	if !f.noUserName {
+		f.UsernameFilter, _ = filterusername.NewUsernameFilter(
+			filterusername.WithReplacement(&replacements),
+		)
+	}
+
+	if !f.noHost {
+		f.HostFilter, _ = filterhost.NewHostFilter(
+			filterhost.WithReplacement(&replacements),
+		)
+	}
+
+	return f
+}
+
+func (f *PiiFilter) Redact(text string) string {
+	// Username -> Email -> Host
+	if f.UsernameFilter != nil {
+		text = f.UsernameFilter.Redact(text, text)
+	}
+	if f.EmailFilter != nil {
+		text = f.EmailFilter.Redact(text, text)
+	}
+	if f.HostFilter != nil {
+		text = f.HostFilter.Redact(text, text)
+	}
+	return text
+}
+
+func (f *PiiFilter) Unredact(text string) string {
+	// Host -> Email -> Username
+	if f.HostFilter != nil {
+		text = f.HostFilter.Unredact(text)
+	}
+	if f.EmailFilter != nil {
+		text = f.EmailFilter.Unredact(text)
+	}
+	if f.UsernameFilter != nil {
+		text = f.UsernameFilter.Unredact(text)
+	}
+	return text
 }
 
 func NewPiiPlugin(opts ...PiiPluginOption) *plugin.Plugin {

@@ -244,3 +244,24 @@ func TestPiiPlugin_Options(t *testing.T) {
 		t.Error("noHost should be true when WithoutHost() is used")
 	}
 }
+
+func TestPiiFilter(t *testing.T) {
+	filter.UseMock = true
+	defer func() {
+		filter.UseMock = false
+	}()
+
+	f := NewPiiFilter(WithoutUsername(), WithoutHost())
+
+	inputText := "Send email to alice@company.com or bob@office.org."
+	redacted := f.Redact(inputText)
+
+	if strings.Contains(redacted, "alice@company.com") || strings.Contains(redacted, "bob@office.org") {
+		t.Errorf("Expected redaction, got: %q", redacted)
+	}
+
+	unredacted := f.Unredact(redacted)
+	if unredacted != inputText {
+		t.Errorf("Expected round-trip to restore original text, got: %q", unredacted)
+	}
+}

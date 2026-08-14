@@ -14,35 +14,43 @@ import (
 // lookupTimeout bounds all name lookups done while building the name list.
 const lookupTimeout = 2 * time.Second
 
-type HostPlugin struct {
-	*filter.UniqueNamesPlugin
+// HostFilter is the pure Go non-ADK filter engine.
+type HostFilter struct {
+	*filter.UniqueNamesFilter
 	domain   string
 	resolver *net.Resolver
 	lookupFn func(domain string) ([]string, error)
 }
 
-type HostPluginOption func(*HostPlugin)
+// Option defines the functional option type for HostFilter.
+type Option func(*HostFilter)
 
-// WithReplacement sets a prefilled replacement table for HostPlugin.
-func WithReplacement(replacements *map[string]string) HostPluginOption {
-	return func(p *HostPlugin) {
+// HostPluginOption is a type alias for Option to maintain backward compatibility.
+type HostPluginOption = Option
+
+// WithReplacement sets a prefilled replacement table for HostFilter.
+func WithReplacement(replacements *map[string]string) Option {
+	return func(h *HostFilter) {
 		if replacements != nil {
-			p.Replacements = replacements
+			if h.UniqueNamesFilter == nil {
+				h.UniqueNamesFilter = &filter.UniqueNamesFilter{}
+			}
+			h.Replacements = replacements
 		}
 	}
 }
 
 // WithDomain sets the local domain manually instead of auto-detecting.
-func WithDomain(domain string) HostPluginOption {
-	return func(p *HostPlugin) {
-		p.domain = domain
+func WithDomain(domain string) Option {
+	return func(h *HostFilter) {
+		h.domain = domain
 	}
 }
 
 // WithDNSServer sets the DNS nameserver manually instead of using the system
 // resolver configuration. The port defaults to 53 if none is given.
-func WithDNSServer(server string) HostPluginOption {
-	return func(p *HostPlugin) {
+func WithDNSServer(server string) Option {
+	return func(h *HostFilter) {
 		if server == "" {
 			return
 		}
@@ -50,7 +58,7 @@ func WithDNSServer(server string) HostPluginOption {
 		if _, _, err := net.SplitHostPort(addr); err != nil {
 			addr = net.JoinHostPort(server, "53")
 		}
-		p.resolver = &net.Resolver{
+		h.resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				var d net.Dialer
@@ -61,27 +69,26 @@ func WithDNSServer(server string) HostPluginOption {
 }
 
 // WithResolver sets the resolver used for all name lookups.
-func WithResolver(resolver *net.Resolver) HostPluginOption {
-	return func(p *HostPlugin) {
+func WithResolver(resolver *net.Resolver) Option {
+	return func(h *HostFilter) {
 		if resolver != nil {
-			p.resolver = resolver
+			h.resolver = resolver
 		}
 	}
 }
 
 // WithLookupFunc configures a custom function to collect the host names of the
 // domain (useful for tests).
-func WithLookupFunc(fn func(domain string) ([]string, error)) HostPluginOption {
-	return func(p *HostPlugin) {
-		p.lookupFn = fn
+func WithLookupFunc(fn func(domain string) ([]string, error)) Option {
+	return func(h *HostFilter) {
+		h.lookupFn = fn
 	}
 }
 
 // LookupHostNames collects the host names that can be discovered for the given
 // domain with the standard library resolver. It queries the NS and MX records
 // of the domain and resolves the addresses of the local interfaces back to
-// names. Unlike a zone transfer this does not enumerate the whole zone, it only
-// finds the hosts the resolver is willing to report.
+// names.
 func LookupHostNames(resolver *net.Resolver, domain string) ([]string, error) {
 	if resolver == nil {
 		resolver = net.DefaultResolver
@@ -207,39 +214,41 @@ func cleanHostAndDomainNames(names []string) []string {
 	return cleaned
 }
 
-// NewHostPlugin creates a new instance of the host filter plugin.
-func NewHostPlugin(opts ...HostPluginOption) (*plugin.Plugin, error) {
-	p := &HostPlugin{
-		UniqueNamesPlugin: &filter.UniqueNamesPlugin{},
-	}
+// NewHostFilter creates a new instance of the decoupled HostFilter.
+func NewHostFilter(opts ...Option) (*HostFilter, error) {
+	h := &HostFilter{}
 	for _, opt := range opts {
-		opt(p)
+		opt(h)
 	}
 
-	if p.Replacements == nil {
+	if h.UniqueNamesFilter == nil {
 		m := make(map[string]string)
-		p.Replacements = &m
+		f, err := filter.NewUniqueNamesFilter(&m, nil)
+		if err != nil {
+			return nil, err
+		}
+		h.UniqueNamesFilter = f
 	}
 
-	if p.resolver == nil {
-		p.resolver = net.DefaultResolver
+	if h.resolver == nil {
+		h.resolver = net.DefaultResolver
 	}
 
-	if p.lookupFn == nil {
-		p.lookupFn = func(domain string) ([]string, error) {
-			return LookupHostNames(p.resolver, domain)
+	if h.lookupFn == nil {
+		h.lookupFn = func(domain string) ([]string, error) {
+			return LookupHostNames(h.resolver, domain)
 		}
 	}
 
 	hostname, _ := os.Hostname()
 
-	if p.domain == "" && hostname != "" {
-		p.domain = detectDomain(p.resolver, hostname)
+	if h.domain == "" && hostname != "" {
+		h.domain = detectDomain(h.resolver, hostname)
 	}
 
 	var rawNames []string
 
-	if names, err := p.lookupFn(p.domain); err == nil {
+	if names, err := h.lookupFn(h.domain); err == nil {
 		rawNames = append(rawNames, names...)
 	}
 
@@ -247,18 +256,30 @@ func NewHostPlugin(opts ...HostPluginOption) (*plugin.Plugin, error) {
 		rawNames = append(rawNames, hostname)
 	}
 
-	if p.domain != "" {
-		rawNames = append(rawNames, p.domain)
+	if h.domain != "" {
+		rawNames = append(rawNames, h.domain)
 	}
 
 	rawNames = append(rawNames, parseEtcHosts()...)
 
 	cleanedNames := cleanHostAndDomainNames(rawNames)
 
-	if err := p.UniqueNamesPlugin.InitRegex(cleanedNames); err != nil {
+	if err := h.UniqueNamesFilter.InitRegex(cleanedNames); err != nil {
 		return nil, err
 	}
 
+	return h, nil
+}
+
+// NewHostPlugin creates a new instance of the host filter plugin.
+func NewHostPlugin(opts ...Option) (*plugin.Plugin, error) {
+	f, err := NewHostFilter(opts...)
+	if err != nil {
+		return nil, err
+	}
+	p := &filter.UniqueNamesPlugin{
+		UniqueNamesFilter: *f.UniqueNamesFilter,
+	}
 	return plugin.New(plugin.Config{
 		Name:                 "host_plugin",
 		BeforeModelCallback:  p.BeforeModelCallback,
