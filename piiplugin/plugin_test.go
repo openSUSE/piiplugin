@@ -265,3 +265,60 @@ func TestPiiFilter(t *testing.T) {
 		t.Errorf("Expected round-trip to restore original text, got: %q", unredacted)
 	}
 }
+
+// TestPiiFilter_ReplacementsMap verifies that the Replacements map is properly
+// populated and accessible after redaction.
+func TestPiiFilter_ReplacementsMap(t *testing.T) {
+	filter.UseMock = true
+	defer func() {
+		filter.UseMock = false
+	}()
+
+	// Create filter with only email enabled, similar to existing TestPiiFilter
+	f := NewPiiFilter(WithoutUsername(), WithoutHost())
+
+	inputText := "Contact john.doe@company.com or jane.roe@example.org for help."
+	redacted := f.Redact(inputText)
+
+	// Verify redaction happened - emails should be replaced with tokens
+	if strings.Contains(redacted, "john.doe") || strings.Contains(redacted, "company.com") {
+		t.Errorf("Expected email to be redacted, got: %q", redacted)
+	}
+	if strings.Contains(redacted, "jane.roe") || strings.Contains(redacted, "example.org") {
+		t.Errorf("Expected email to be redacted, got: %q", redacted)
+	}
+
+	// Verify Replacements map is accessible and populated
+	if f.Replacements == nil {
+		t.Fatal("Replacements map should not be nil")
+	}
+
+	replacements := *f.Replacements
+	if len(replacements) == 0 {
+		t.Error("Expected at least one replacement to be generated")
+	}
+
+	// Check that the redacted tokens exist in the replacements map
+	for redactedToken, originalValue := range replacements {
+		if redactedToken == "" {
+			t.Error("Redacted token should not be empty string")
+		}
+		if originalValue == "" {
+			t.Error("Original value should not be empty string")
+		}
+		// Verify the redacted token appears in the redacted text
+		if !strings.Contains(redacted, redactedToken) {
+			t.Errorf("Expected redacted token %q to appear in redacted text %q", redactedToken, redacted)
+		}
+		// Verify original value does NOT appear in redacted text
+		if strings.Contains(redacted, originalValue) {
+			t.Errorf("Original value %q should not appear in redacted text %q", originalValue, redacted)
+		}
+	}
+
+	// Test Unredact uses the same map - verify round-trip works
+	unredacted := f.Unredact(redacted)
+	if unredacted != inputText {
+		t.Errorf("Expected round-trip to restore original text\nGot: %q\nWant:%q", unredacted, inputText)
+	}
+}

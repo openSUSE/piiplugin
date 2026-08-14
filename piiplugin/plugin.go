@@ -65,6 +65,7 @@ type PiiFilter struct {
 	EmailFilter    *filteremail.EmailFilter
 	HostFilter     *filterhost.HostFilter
 	UsernameFilter *filterusername.UsernameFilter
+	Replacements   *map[string]string // Expose the replacements map
 }
 
 func (f *PiiFilter) SetWithoutEmail(v bool) {
@@ -86,6 +87,7 @@ func NewPiiFilter(opts ...PiiPluginOption) *PiiFilter {
 	}
 
 	replacements := make(map[string]string)
+	f.Replacements = &replacements // Bind the map to the exposed field
 
 	if !f.noEMail {
 		f.EmailFilter = filteremail.NewEmailFilter(
