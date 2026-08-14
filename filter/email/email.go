@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/openSUSE/piiplug/filter"
+	"github.com/openSUSE/piiplugin/filter"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/plugin"

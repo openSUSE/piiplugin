@@ -1,9 +1,9 @@
 package piiplugin
 
 import (
-	filteremail "github.com/openSUSE/piiplug/filter/email"
-	filterhost "github.com/openSUSE/piiplug/filter/host"
-	filterusername "github.com/openSUSE/piiplug/filter/username"
+	filteremail "github.com/openSUSE/piiplugin/filter/email"
+	filterhost "github.com/openSUSE/piiplugin/filter/host"
+	filterusername "github.com/openSUSE/piiplugin/filter/username"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/plugin"

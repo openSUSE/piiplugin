@@ -132,7 +132,7 @@ LLMs. Use `WithTLDSuffix` if you want it replaced as well.
 ### Programmatic (composite plugin)
 
 ```go
-import "github.com/openSUSE/piiplug/piiplugin"
+import "github.com/openSUSE/piiplugin/piiplugin"
 
 // All filters enabled, sharing one replacement table.
 plug := piiplugin.NewPiiPlugin()
@@ -162,9 +162,9 @@ Every filter can also be created on its own. Pass the same
 
 ```go
 import (
-    filteremail "github.com/openSUSE/piiplug/filter/email"
-    filterhost "github.com/openSUSE/piiplug/filter/host"
-    filterusername "github.com/openSUSE/piiplug/filter/username"
+    filteremail "github.com/openSUSE/piiplugin/filter/email"
+    filterhost "github.com/openSUSE/piiplugin/filter/host"
+    filterusername "github.com/openSUSE/piiplugin/filter/username"
 )
 
 // Can be pre-filled. If key == value is used, the name is "white listed" (not replaced).

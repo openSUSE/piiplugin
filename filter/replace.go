@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/openSUSE/piiplug/names"
+	"github.com/openSUSE/piiplugin/names"
 )
 
 const minNamelength = 8

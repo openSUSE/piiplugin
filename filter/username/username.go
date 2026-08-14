@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/openSUSE/piiplug/filter"
+	"github.com/openSUSE/piiplugin/filter"
 	"google.golang.org/adk/v2/plugin"
 )
 
