@@ -1,4 +1,5 @@
-// Package filteremail is the filter based on regexp for eMail addresses
+// Package filteremail is the pure Go filter for eMail addresses. It has no
+// dependency on the ADK; the plugin/callback layer lives in the piiplugin package.
 package filteremail
 
 import (
@@ -6,13 +7,9 @@ import (
 	"strings"
 
 	"github.com/openSUSE/piiplugin/filter"
-	"google.golang.org/adk/v2/agent"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/adk/v2/plugin"
-	"google.golang.org/adk/v2/tool"
 )
 
-// EmailFilter is the pure Go non-ADK filter engine.
+// EmailFilter is the pureGo non-ADK filter engine.
 type EmailFilter struct {
 	replacements *map[string]string
 	tldSuffix    map[string]string
@@ -149,129 +146,4 @@ func (f *EmailFilter) Redact(text string, fullInput string) string {
 // Unredact reverses the redact changes in the response text using the shared replacement table.
 func (f *EmailFilter) Unredact(text string) string {
 	return filter.UnredactText(f.replacements, text)
-}
-
-// EmailPlugin is a thin adapter wrapper that implements ADK callback interfaces.
-type EmailPlugin struct {
-	replacements *map[string]string
-	tldSuffix    map[string]string
-}
-
-// NewEmailPlugin creates a new instance of the email filter plugin.
-func NewEmailPlugin(opts ...Option) (*plugin.Plugin, error) {
-	f := NewEmailFilter(opts...)
-	p := &EmailPlugin{
-		replacements: f.replacements,
-		tldSuffix:    f.tldSuffix,
-	}
-	return plugin.New(plugin.Config{
-		Name:                 "eMail_plugin",
-		BeforeModelCallback:  p.BeforeModelCallback,
-		AfterModelCallback:   p.AfterModelCallback,
-		OnModelErrorCallback: p.OnModelErrorCallback,
-		BeforeToolCallback:   p.BeforeToolCallback,
-		AfterToolCallback:    p.AfterToolCallback,
-		OnToolErrorCallback:  p.OnToolErrorCallback,
-	})
-}
-
-func (p *EmailPlugin) redactEmails(text string, fullInput string) string {
-	f := &EmailFilter{replacements: p.replacements, tldSuffix: p.tldSuffix}
-	return f.Redact(text, fullInput)
-}
-
-func (p *EmailPlugin) unredactText(text string) string {
-	f := &EmailFilter{replacements: p.replacements, tldSuffix: p.tldSuffix}
-	return f.Unredact(text)
-}
-
-// getFullInputText gathers all text from the LLMRequest contents to verify that generated replacements
-// are not part of the input.
-func getFullInputText(req *model.LLMRequest) string {
-	if req == nil {
-		return ""
-	}
-	var sb strings.Builder
-	for _, content := range req.Contents {
-		if content == nil {
-			continue
-		}
-		for _, part := range content.Parts {
-			if part == nil {
-				continue
-			}
-			sb.WriteString(part.Text)
-			sb.WriteString(" ")
-		}
-	}
-	return sb.String()
-}
-
-// BeforeModelCallback intercepts the model request and redacts all found email addresses.
-func (p *EmailPlugin) BeforeModelCallback(ctx agent.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
-	if req == nil {
-		return nil, nil
-	}
-	fullInput := getFullInputText(req)
-
-	for _, content := range req.Contents {
-		if content == nil {
-			continue
-		}
-		for _, part := range content.Parts {
-			if part == nil || part.Text == "" {
-				continue
-			}
-			part.Text = p.redactEmails(part.Text, fullInput)
-		}
-	}
-	return nil, nil
-}
-
-// AfterModelCallback restores the original emails in the LLM response.
-func (p *EmailPlugin) AfterModelCallback(ctx agent.Context, resp *model.LLMResponse, err error) (*model.LLMResponse, error) {
-	if resp == nil || resp.Content == nil {
-		return nil, nil
-	}
-	for _, part := range resp.Content.Parts {
-		if part == nil || part.Text == "" {
-			continue
-		}
-		part.Text = p.unredactText(part.Text)
-	}
-	return nil, nil
-}
-
-// OnModelErrorCallback is a pass-through for model errors.
-func (p *EmailPlugin) OnModelErrorCallback(ctx agent.Context, req *model.LLMRequest, err error) (*model.LLMResponse, error) {
-	return nil, nil
-}
-
-// BeforeToolCallback restores the original addresses in the tool arguments.
-func (p *EmailPlugin) BeforeToolCallback(ctx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
-	filter.MapToolValues(args, p.unredactText)
-	return nil, nil
-}
-
-// AfterToolCallback redacts the tool result before it is handed to the model.
-func (p *EmailPlugin) AfterToolCallback(ctx agent.Context, t tool.Tool, args, result map[string]any, err error) (map[string]any, error) {
-	fullInput := filter.ToolValuesText(args) + filter.ToolValuesText(result)
-	redact := func(text string) string {
-		return p.redactEmails(text, fullInput)
-	}
-	filter.MapToolValues(args, redact)
-	if result == nil {
-		return nil, nil
-	}
-	filter.MapToolValues(result, redact)
-	return nil, nil
-}
-
-// OnToolErrorCallback redacts the message of a failed tool call.
-func (p *EmailPlugin) OnToolErrorCallback(ctx agent.Context, t tool.Tool, args map[string]any, err error) (map[string]any, error) {
-	if err == nil {
-		return nil, nil
-	}
-	message := err.Error()
-	return map[string]any{"error": p.redactEmails(message, message)}, nil
 }

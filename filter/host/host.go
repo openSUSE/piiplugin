@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/openSUSE/piiplugin/filter"
-	"google.golang.org/adk/v2/plugin"
 )
 
 // lookupTimeout bounds all name lookups done while building the name list.
@@ -269,24 +268,4 @@ func NewHostFilter(opts ...Option) (*HostFilter, error) {
 	}
 
 	return h, nil
-}
-
-// NewHostPlugin creates a new instance of the host filter plugin.
-func NewHostPlugin(opts ...Option) (*plugin.Plugin, error) {
-	f, err := NewHostFilter(opts...)
-	if err != nil {
-		return nil, err
-	}
-	p := &filter.UniqueNamesPlugin{
-		UniqueNamesFilter: *f.UniqueNamesFilter,
-	}
-	return plugin.New(plugin.Config{
-		Name:                 "host_plugin",
-		BeforeModelCallback:  p.BeforeModelCallback,
-		AfterModelCallback:   p.AfterModelCallback,
-		OnModelErrorCallback: p.OnModelErrorCallback,
-		BeforeToolCallback:   p.BeforeToolCallback,
-		AfterToolCallback:    p.AfterToolCallback,
-		OnToolErrorCallback:  p.OnToolErrorCallback,
-	})
 }

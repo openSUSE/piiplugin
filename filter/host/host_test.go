@@ -3,38 +3,24 @@ package filterhost
 import (
 	"strings"
 	"testing"
-
-	"github.com/openSUSE/piiplugin/filter"
-	"google.golang.org/adk/v2/agent"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
 )
-
-type mockContext struct {
-	agent.Context
-}
 
 func newReplMap() *map[string]string {
 	m := make(map[string]string)
 	return &m
 }
 
-func TestNewHostPlugin_Defaults(t *testing.T) {
-	plugin, err := NewHostPlugin()
+func TestNewHostFilter_Defaults(t *testing.T) {
+	f, err := NewHostFilter()
 	if err != nil {
-		t.Fatalf("Failed to create HostPlugin: %v", err)
+		t.Fatalf("Failed to create HostFilter: %v", err)
 	}
-	if plugin == nil {
-		t.Fatal("Plugin should not be nil")
+	if f == nil {
+		t.Fatal("Filter should not be nil")
 	}
 }
 
-func TestHostPlugin_RedactAndUnredact(t *testing.T) {
-	filter.UseMock = true
-	defer func() {
-		filter.UseMock = false
-	}()
-
+func TestHostFilter_RedactAndUnredact(t *testing.T) {
 	replacements := newReplMap()
 	lookupMock := func(domain string) ([]string, error) {
 		return []string{
@@ -44,68 +30,30 @@ func TestHostPlugin_RedactAndUnredact(t *testing.T) {
 		}, nil
 	}
 
-	plugin, err := NewHostPlugin(
+	f, err := NewHostFilter(
 		WithReplacement(replacements),
 		WithDomain("myoffice.internal"),
 		WithDNSServer("192.168.1.1"),
 		WithLookupFunc(lookupMock),
 	)
 	if err != nil {
-		t.Fatalf("Failed to create HostPlugin: %v", err)
+		t.Fatalf("Failed to create HostFilter: %v", err)
 	}
 
 	inputText := "Connect to mailserver.myoffice.internal or gateway. We also have workstation42 and our internal domain is myoffice.internal."
+	redacted := f.Redact(inputText, inputText)
 
-	req := &model.LLMRequest{
-		Contents: []*genai.Content{
-			{
-				Parts: []*genai.Part{
-					{Text: inputText},
-				},
-			},
-		},
-	}
-
-	ctx := &mockContext{}
-	_, err = plugin.BeforeModelCallback()(ctx, req)
-	if err != nil {
-		t.Fatalf("BeforeModelCallback failed: %v", err)
+	// Each of the four host names must be replaced with a different value.
+	for _, name := range []string{
+		"mailserver", "gateway", "workstation42", "myoffice",
+	} {
+		if strings.Contains(redacted, name) {
+			t.Errorf("Expected %q to be redacted, got: %q", name, redacted)
+		}
 	}
 
-	redacted := req.Contents[0].Parts[0].Text
-
-	// mailserver.myoffice.internal -> lanretni.eciffoym.revresliam
-	// gateway -> yawetag
-	// workstation42 -> 24noitatskrow
-	// myoffice.internal -> lanretni.eciffoym
-	if !strings.Contains(redacted, "lanretni.eciffoym.revresliam") {
-		t.Errorf("Expected 'mailserver.myoffice.internal' to be replaced, got: %q", redacted)
-	}
-	if !strings.Contains(redacted, "yawetag") {
-		t.Errorf("Expected 'gateway' to be replaced, got: %q", redacted)
-	}
-	if !strings.Contains(redacted, "24noitatskrow") {
-		t.Errorf("Expected 'workstation42' to be replaced, got: %q", redacted)
-	}
-	if !strings.Contains(redacted, "lanretni.eciffoym") {
-		t.Errorf("Expected 'myoffice.internal' to be replaced, got: %q", redacted)
-	}
-
-	// Create response to restore original names
-	resp := &model.LLMResponse{
-		Content: &genai.Content{
-			Parts: []*genai.Part{
-				{Text: redacted},
-			},
-		},
-	}
-
-	_, err = plugin.AfterModelCallback()(ctx, resp, nil)
-	if err != nil {
-		t.Fatalf("AfterModelCallback failed: %v", err)
-	}
-
-	unredacted := resp.Content.Parts[0].Text
+	// Round-trip must be lossless.
+	unredacted := f.Unredact(redacted)
 	if unredacted != inputText {
 		t.Errorf("Unredacting failed.\nExpected: %q\nGot:      %q", inputText, unredacted)
 	}

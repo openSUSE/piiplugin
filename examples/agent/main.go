@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	filterusername "github.com/openSUSE/piiplugin/filter/username"
+	"github.com/openSUSE/piiplugin/piiplugin/adk"
 	"github.com/toon-format/toon-go"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -163,9 +164,14 @@ func main() {
 	}
 
 	// Consume our own flags, the rest of the arguments belong to the launcher.
-	disableUsernamePlugin, prompt, launcherArgs, err := utils.SplitOwnFlags(os.Args[1:])
+	disableUsernamePlugin, prompt, usernameSource, launcherArgs, err := utils.SplitOwnFlags(os.Args[1:])
 	if err != nil {
 		log.Fatalf("Failed to parse arguments: %v", err)
+	}
+
+	if disableUsernamePlugin && usernameSource != "" {
+		fmt.Fprintln(os.Stderr, "--username-source is ignored when the username filter is disabled")
+		disableUsernamePlugin = true
 	}
 
 	a, err := llmagent.New(llmagent.Config{
@@ -184,7 +190,15 @@ func main() {
 	// Build plugin list
 	var plugins []*plugin.Plugin
 	if !disableUsernamePlugin {
-		usernamePlugin, err := filterusername.NewUsernamePlugin()
+		var opts []filterusername.Option
+		if usernameSource != "" {
+			src := filterusername.Source(usernameSource)
+			if src != filterusername.SourceAuto && src != filterusername.SourceCgo && src != filterusername.SourceGetent {
+				log.Fatalf("Invalid --username-source %q (expected auto, cgo or getent)", usernameSource)
+			}
+			opts = append(opts, filterusername.WithUsernameSource(src))
+		}
+		usernamePlugin, err := adk.NewUsernamePlugin(opts...)
 		if err != nil {
 			log.Fatalf("Failed to create username plugin: %v", err)
 		}
@@ -211,9 +225,10 @@ func main() {
 
 	// Without any argument there is nothing to run, so show how to run it.
 	if len(launcherArgs) == 0 {
-		fmt.Printf("Usage: %s [-p|--prompt PROMPT] [--disable-username-plugin] [LAUNCHER ARGUMENTS]\n\n", filepath.Base(os.Args[0]))
+		fmt.Printf("Usage: %s [-p|--prompt PROMPT] [--disable-username-plugin] [--username-source auto|cgo|getent] [LAUNCHER ARGUMENTS]\n\n", filepath.Base(os.Args[0]))
 		fmt.Printf("  -p, --prompt PROMPT\n        answer a single prompt and exit\n")
-		fmt.Printf("  --disable-username-plugin\n        run without the username PII filter\n\n")
+		fmt.Printf("  --disable-username-plugin\n        run without the username PII filter\n")
+		fmt.Printf("  --username-source SOURCE\n        source of the user database for the username filter: auto (default), cgo (getpwent) or getent (no CGO)\n\n")
 		fmt.Println(l.CommandLineSyntax())
 		return
 	}

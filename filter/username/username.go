@@ -1,26 +1,22 @@
 package filterusername
 
-/*
-#include <pwd.h>
-#include <sys/types.h>
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/openSUSE/piiplugin/filter"
-	"google.golang.org/adk/v2/plugin"
 )
 
-// UsernameFilter is the pure Go non-ADK filter engine.
+// UsernameFilter is the pure Go non-ADK filter engine. It builds its name list
+// from the system's user database (login names and the GECOS field) and uses
+// filter.UniqueNamesFilter to redact and unredact them.
 type UsernameFilter struct {
 	*filter.UniqueNamesFilter
 	getpasswdFn    func() ([]string, error)
 	isSystemUserFn func(id int) bool
+	source         Source
 }
 
 // Option defines the functional option type for UsernameFilter.
@@ -28,6 +24,20 @@ type Option func(*UsernameFilter)
 
 // UsernamePluginOption is a type alias for Option to maintain backward compatibility.
 type UsernamePluginOption = Option
+
+// Source selects how the filter reads the system's user database.
+type Source string
+
+const (
+	// SourceAuto uses the CGO getpwent lookup when available and falls back to
+	// the getent command otherwise.
+	SourceAuto Source = "auto"
+	// SourceCgo forces the CGO getpwent(3) lookup.
+	SourceCgo Source = "cgo"
+	// SourceGetent forces reading the user database through the getent command
+	// (no CGO required).
+	SourceGetent Source = "getent"
+)
 
 // WithReplacement sets a prefilled replacement table for UsernameFilter.
 func WithReplacement(replacements *map[string]string) Option {
@@ -41,8 +51,9 @@ func WithReplacement(replacements *map[string]string) Option {
 	}
 }
 
-// WithGetpasswdFunc allows replacing the default user retrieval (CGO getpwent) with a
-// custom function that returns passwd/gecos compatible colon-separated entries.
+// WithGetpasswdFunc overrides the default user retrieval with a custom function
+// that returns passwd/gecos compatible colon-separated entries. It wins over the
+// source selected with WithUsernameSource.
 func WithGetpasswdFunc(fn func() ([]string, error)) Option {
 	return func(u *UsernameFilter) {
 		u.getpasswdFn = fn
@@ -53,6 +64,16 @@ func WithGetpasswdFunc(fn func() ([]string, error)) Option {
 func WithIsSystemUserFunc(fn func(id int) bool) Option {
 	return func(u *UsernameFilter) {
 		u.isSystemUserFn = fn
+	}
+}
+
+// WithUsernameSource selects the user database source. SourceAuto (the default)
+// prefers the CGO getpwent lookup and falls back to getent, SourceGetent always
+// reads the database through getent so the filter can be built without CGO, and
+// SourceCgo always uses getpwent(3).
+func WithUsernameSource(source Source) Option {
+	return func(u *UsernameFilter) {
+		u.source = source
 	}
 }
 
@@ -67,32 +88,6 @@ func uniqueNames(names []string) []string {
 		}
 	}
 	return unique
-}
-
-// FetchCgoPasswd returns passwd entries from the system via CGO getpwent.
-func FetchCgoPasswd() ([]string, error) {
-	var entries []string
-	C.setpwent()
-	defer C.endpwent()
-
-	for {
-		pw := C.getpwent()
-		if pw == nil {
-			break
-		}
-		// Format: name:passwd:uid:gid:gecos:dir:shell
-		entry := fmt.Sprintf(
-			"%s:x:%d:%d:%s:%s:%s",
-			C.GoString(pw.pw_name),
-			uint32(pw.pw_uid),
-			uint32(pw.pw_gid),
-			C.GoString(pw.pw_gecos),
-			C.GoString(pw.pw_dir),
-			C.GoString(pw.pw_shell),
-		)
-		entries = append(entries, entry)
-	}
-	return entries, nil
 }
 
 // parsePasswdEntries extracts usernames and individual GECOS names from passwd-compatible lines.
@@ -145,6 +140,44 @@ func IsSystemUserDefault(id int) bool {
 	return id < 1000
 }
 
+// FetchGetentPasswd returns passwd-compatible entries by parsing the output of
+// `getent passwd`. It is a pure Go implementation of the user database lookup,
+// so the filter can be built and used without CGO.
+func FetchGetentPasswd() ([]string, error) {
+	out, err := exec.Command("getent", "passwd").Output()
+	if err != nil {
+		return nil, fmt.Errorf("getent passwd: %w", err)
+	}
+	var entries []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line != "" {
+			entries = append(entries, line)
+		}
+	}
+	return entries, nil
+}
+
+// resolvedGetpasswd picks the user database source for this filter: an explicit
+// WithGetpasswdFunc always wins; otherwise SourceCgo uses getpwent(3),
+// SourceGetent reads through getent, and SourceAuto (the default) uses getpwent(3)
+// when it was compiled in (CGO enabled) and getent otherwise.
+func (u *UsernameFilter) resolvedGetpasswd() (func() ([]string, error), error) {
+	switch u.source {
+	case SourceCgo:
+		if cgoSource == nil {
+			return nil, fmt.Errorf("username filter: CGO getpwent is not available in this build (built without CGO); use WithUsernameSource(SourceGetent) or provide a custom source")
+		}
+		return cgoSource, nil
+	case SourceGetent:
+		return FetchGetentPasswd, nil
+	default: // SourceAuto and zero value
+		if cgoSource != nil {
+			return cgoSource, nil
+		}
+		return FetchGetentPasswd, nil
+	}
+}
+
 // NewUsernameFilter creates a new instance of the decoupled UsernameFilter.
 func NewUsernameFilter(opts ...Option) (*UsernameFilter, error) {
 	u := &UsernameFilter{}
@@ -161,9 +194,13 @@ func NewUsernameFilter(opts ...Option) (*UsernameFilter, error) {
 		u.UniqueNamesFilter = f
 	}
 
-	// Fetch from CGO if no custom function is provided
+	// Fetch from the configured source if no custom function is provided.
 	if u.getpasswdFn == nil {
-		u.getpasswdFn = FetchCgoPasswd
+		getpasswd, err := u.resolvedGetpasswd()
+		if err != nil {
+			return nil, err
+		}
+		u.getpasswdFn = getpasswd
 	}
 
 	entries, err := u.getpasswdFn()
@@ -183,24 +220,4 @@ func NewUsernameFilter(opts ...Option) (*UsernameFilter, error) {
 	}
 
 	return u, nil
-}
-
-// NewUsernamePlugin creates a new instance of the username filter plugin.
-func NewUsernamePlugin(opts ...Option) (*plugin.Plugin, error) {
-	f, err := NewUsernameFilter(opts...)
-	if err != nil {
-		return nil, err
-	}
-	p := &filter.UniqueNamesPlugin{
-		UniqueNamesFilter: *f.UniqueNamesFilter,
-	}
-	return plugin.New(plugin.Config{
-		Name:                 "username_plugin",
-		BeforeModelCallback:  p.BeforeModelCallback,
-		AfterModelCallback:   p.AfterModelCallback,
-		OnModelErrorCallback: p.OnModelErrorCallback,
-		BeforeToolCallback:   p.BeforeToolCallback,
-		AfterToolCallback:    p.AfterToolCallback,
-		OnToolErrorCallback:  p.OnToolErrorCallback,
-	})
 }

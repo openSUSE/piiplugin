@@ -28,15 +28,29 @@ that share a common interface and can be used separately or all at once:
 
 | Filter | Package | What it recognises | Where the names come from |
 | --- | --- | --- | --- |
-| **User names** | `filter/username` | Login names and the names in the GECOS field | The system user database via `getpwent(3)` (the same source as `getent passwd`), restricted to UID ≥ 1000 |
+| **User names** | `filter/username` | Login names and the names in the GECOS field | The system user database via `getpwent(3)` or the `getent passwd` command (selectable, see `WithUsernameSource`), restricted to UID ≥ 1000 |
 | **Host names** | `filter/host` | Host names, domains and FQDNs | The local host name and domain, the `NS` and `MX` records of that domain, reverse lookups of the local interface addresses and `/etc/hosts` |
 | **eMail addresses** | `filter/email` | Anything matching an address pattern, including local addresses without a TLD such as `goo@baar` | Detected by a regular expression, no pre-filled list |
 
-Filters that work on a fixed list of names embed `filter.UniqueNamesPlugin`,
+Filters that work on a fixed list of names embed `filter.UniqueNamesFilter`,
 which compiles the list into one case-insensitive regular expression — sorted by
-length descending so longer names match before their own prefixes — and
-implements all callbacks. Adding a new list-based filter means collecting the
-names and calling `InitRegex`.
+length descending so longer names match before their own prefixes — and provides
+the `Redact`/`Unredact` engine. Adding a new list-based filter means collecting
+the names and calling `InitRegex`.
+
+### Filters are decoupled from the ADK
+
+The filter engines (`filter/username`, `filter/host`, `filter/email` and the
+shared `filter` package) and the `piiplugin` composite are **pure Go and import
+the ADK nowhere**. The Google ADK plugin/callback bindings live in a separate
+package, `piiplugin/adk`, that wraps any filter exposing `Redact(text, fullInput)`
+and `Unredact(text)`. You can therefore:
+
+- use the redaction engine directly (`NewPiiFilter`, `Redact`, `Unredact`) with
+  no ADK dependency, or
+- register an ADK plugin from `piiplugin/adk`, or
+- build with `CGO_ENABLED=0` — only `piiplugin/adk` and the demo agent need the
+  ADK; the filter engine itself is CGO-free (see below).
 
 ### The shared replacement table
 
@@ -87,7 +101,7 @@ sequenceDiagram
 > [!IMPORTANT]
 > `OnToolErrorCallback` has to return a result, and returning one ends the
 > callback chain of the ADK runner. Filters that should redact tool errors
-> together therefore have to be combined with `piiplugin.NewPiiPlugin()` — if
+> together therefore have to be combined with `adk.NewPiiPlugin()` — if
 > they are registered individually with the runner, only the first one sees a
 > tool error.
 
@@ -132,16 +146,26 @@ LLMs. Use `WithTLDSuffix` if you want it replaced as well.
 ### Programmatic (composite plugin)
 
 ```go
-import "github.com/openSUSE/piiplugin/piiplugin"
+import (
+    "github.com/openSUSE/piiplugin/piiplugin"
+    filterusername "github.com/openSUSE/piiplugin/filter/username"
+    "github.com/openSUSE/piiplugin/piiplugin/adk"
+)
 
 // All filters enabled, sharing one replacement table.
-plug := piiplugin.NewPiiPlugin()
+plug, err := adk.NewPiiPlugin()
+if err != nil { /* handle */ }
 
 // Disable individual filters.
-plug = piiplugin.NewPiiPlugin(
+plug, _ = adk.NewPiiPlugin(
     piiplugin.WithoutEmail(),
     piiplugin.WithoutHost(),
     piiplugin.WithoutUsername(),
+)
+
+// Read the user database via getent instead of CGO getpwent.
+plug, _ = adk.NewPiiPlugin(
+    piiplugin.WithUsernameSource(filterusername.SourceGetent),
 )
 ```
 
@@ -157,11 +181,13 @@ config := &launcher.Config{
 
 ### Programmatic (individual filters)
 
-Every filter can also be created on its own. Pass the same
+Every filter can also be created on its own. The ADK plugins are created from
+the `piiplugin/adk` package; pass the same
 `*map[string]string` to all of them to share one replacement table:
 
 ```go
 import (
+    "github.com/openSUSE/piiplugin/piiplugin/adk"
     filteremail "github.com/openSUSE/piiplugin/filter/email"
     filterhost "github.com/openSUSE/piiplugin/filter/host"
     filterusername "github.com/openSUSE/piiplugin/filter/username"
@@ -170,23 +196,35 @@ import (
 // Can be pre-filled. If key == value is used, the name is "white listed" (not replaced).
 replacements := make(map[string]string)
 
-userPlug, err := filterusername.NewUsernamePlugin(
+userPlug, err := adk.NewUsernamePlugin(
     filterusername.WithReplacement(&replacements),
 )
-hostPlug, err := filterhost.NewHostPlugin(
+hostPlug, err := adk.NewHostPlugin(
     filterhost.WithReplacement(&replacements),
     filterhost.WithDomain("example.com"),
 )
-mailPlug, err := filteremail.NewEmailPlugin(
+mailPlug, err := adk.NewEmailPlugin(
     filteremail.WithReplacement(&replacements),
     filteremail.WithTLDSuffix(map[string]string{"*": "invalid"}),
 )
 ```
 
+Or use the redaction engine without any ADK dependency:
+
+```go
+import "github.com/openSUSE/piiplugin/piiplugin"
+
+f := piiplugin.NewPiiFilter()           // all three filters, shared table
+redacted := f.Redact(text, text)        // text leaving the machine
+original := f.Unredact(redacted)        // text coming back
+```
+
 | Filter | Option | Description |
 | --- | --- | --- |
 | all | `WithReplacement(*map[string]string)` | Use a shared, possibly pre-filled replacement table |
-| username | `WithGetpasswdFunc(func() ([]string, error))` | Replace the `getpwent` lookup with a custom source of `passwd`-style lines |
+| all (composite) | `piiplugin.WithoutEmail()` / `WithoutUsername()` / `WithoutHost()` | Disable a filter (also `piiplugin.WithUsernameSource(...)`) |
+| username | `WithUsernameSource(Source)` | Source of the user database: `SourceAuto` (default), `SourceCgo` (getpwent, requires CGO) or `SourceGetent` (no CGO) |
+| username | `WithGetpasswdFunc(func() ([]string, error))` | Replace the user lookup with a custom source of `passwd`-style lines |
 | host | `WithDomain(string)` | Set the local domain instead of auto-detecting it |
 | host | `WithDNSServer(string)` | Query a specific nameserver (port defaults to `53`) |
 | host | `WithResolver(*net.Resolver)` | Use a custom resolver for all lookups |
@@ -199,21 +237,23 @@ In some cases some user names should not be replaced. Although there is no white
 
 ### Agent demo
 
-The repository root contains a small demo agent that exposes a `get_processes`
-tool — a good way to see the filters at work, since `ps` output is full of user
-names.
+The `examples/agent` directory contains a small demo agent that exposes a
+`get_processes` tool — a good way to see the filters at work, since `ps` output
+is full of user names.
 
 ```bash
-go run . console                            # interactive console session
-go run . -p "which processes use most RAM?" # answer a single prompt and exit
-go run . console --disable-username-plugin  # start without the user name filter
-go run .                                    # print the usage of the launcher
+go run ./examples/agent console                            # interactive console session
+go run ./examples/agent -p "which processes use most RAM?" # answer a single prompt and exit
+go run ./examples/agent console --disable-username-plugin  # start without the user name filter
+go run ./examples/agent console --username-source getent   # read users via getent (no CGO)
+go run ./examples/agent                                    # print the usage of the launcher
 ```
 
 | Option | Description |
 | --- | --- |
 | `-p`, `--prompt PROMPT` | Answer a single prompt, print the response and exit |
 | `--disable-username-plugin` | Run without the user name PII filter |
+| `--username-source SOURCE` | Source of the user database for the user name filter: `auto` (default), `cgo` (getpwent) or `getent` (no CGO) |
 
 All remaining arguments are handed over to the ADK launcher (`console`, `web`, …).
 
@@ -253,8 +293,10 @@ instead of a random name, which keeps test expectations readable.
 
 - The host filter does not enumerate a whole zone; it only finds the hosts the
   resolver is willing to report (`NS`, `MX`, reverse lookups, `/etc/hosts`).
-- The user name filter needs cgo and a POSIX user database, so it is Linux/Unix
-  only.
+- The user name filter needs a POSIX user database, so it is Linux/Unix only. It
+  reads it via CGO `getpwent(3)` by default or via the `getent` command
+  (`WithUsernameSource(SourceGetent)`) so the filter engine can be built with
+  `CGO_ENABLED=0`; `getent` must be on the `PATH` in that case.
 - Only names known at startup are redacted. Values that first appear in a tool
   result — for instance a user name of a UID below 1000 — are not recognised.
 - The replacement table lives in memory for the lifetime of the process and is

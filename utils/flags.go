@@ -186,12 +186,29 @@ func (f *StringFlag) SetAliases(aliases ...string) *StringFlag {
 }
 
 // SplitOwnFlags is a convenience function that parses command-line arguments using predefined flags.
-// It returns the same values as FlagSet.SplitOwnFlags with predefined flags for "disable-username-plugin" and "prompt".
-func SplitOwnFlags(args []string) (bool, string, []string, error) {
+// It returns the same values as FlagSet.SplitOwnFlags with predefined flags for
+// "disable-username-plugin", "prompt" and "username-source". The returned
+// usernameSource is the value of the --username-source flag ("auto", "cgo" or
+// "getent", or empty to use the default).
+func SplitOwnFlags(args []string) (bool, string, string, []string, error) {
 	flagSet := NewFlagSet(
 		NewBoolFlag("disable-username-plugin", false).SetAliases("disable_username_plugin"),
 		NewStringFlag("prompt", "").SetAliases("prompt_text", "p"),
+		NewStringFlag("username-source", "").SetAliases("username_source"),
 	)
 
-	return flagSet.SplitOwnFlags(args)
+	hasBoolFlags, prompt, newArgs, err := flagSet.SplitOwnFlags(args)
+	if err != nil {
+		return hasBoolFlags, prompt, "", newArgs, err
+	}
+
+	var usernameSource string
+	for _, f := range flagSet.stringFlags {
+		if f.Name == "username-source" {
+			usernameSource = f.Value
+			break
+		}
+	}
+
+	return hasBoolFlags, prompt, usernameSource, newArgs, nil
 }
